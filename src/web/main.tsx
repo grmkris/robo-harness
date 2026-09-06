@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+
 import {
   joints,
   type AppEvent,
   type Observation,
   type ProviderInfo,
 } from "../shared/contracts";
+
 import "./style.css";
 
 type Status = {
@@ -44,13 +46,13 @@ type Recorded = {
 // HTTP tailnet origins lack randomUUID; getRandomValues also works there.
 const newId = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0"),
+    byte.toString(16).padStart(2, "0")
   ).join("");
 const browserController = sessionStorage.getItem("robo-controller") ?? newId();
 sessionStorage.setItem("robo-controller", browserController);
 async function api<T = Record<string, unknown>>(
   path: string,
-  body?: unknown,
+  body?: unknown
 ): Promise<T> {
   const response = await fetch("/api/" + path, {
     method: body === undefined ? "GET" : "POST",
@@ -65,7 +67,7 @@ async function api<T = Record<string, unknown>>(
     throw new Error(
       response.status === 401
         ? "AUTH_REQUIRED"
-        : (result.error ?? "Request failed"),
+        : (result.error ?? "Request failed")
     );
   return result;
 }
@@ -119,7 +121,7 @@ function Login({ onDone }: { onDone: () => void }) {
             setError(
               (e as Error).message === "AUTH_REQUIRED"
                 ? "Incorrect operator token"
-                : (e as Error).message,
+                : (e as Error).message
             );
           } finally {
             setBusy(false);
@@ -160,10 +162,10 @@ function App() {
     [fallback, setFallback] = useState(false),
     [pending, setPending] = useState(false);
   const [recordName, setRecordName] = useState(
-    "Exploration " + new Date().toLocaleDateString(),
+    "Exploration " + new Date().toLocaleDateString()
   );
   const [session, setSession] = useState<string | undefined>(
-      () => sessionStorage.getItem("robo-conversation") ?? undefined,
+      () => sessionStorage.getItem("robo-conversation") ?? undefined
     ),
     [provider, setProvider] = useState(""),
     [message, setMessage] = useState("");
@@ -207,7 +209,7 @@ function App() {
       setEvents((previous) =>
         previous.some((p) => p.id === event.id)
           ? previous
-          : [...previous, event].slice(-250),
+          : [...previous, event].slice(-250)
       );
       if (event.type === "chat.delta")
         setDraft((v) => v + String(event.data.text));
@@ -235,16 +237,16 @@ function App() {
     else sessionStorage.removeItem("robo-conversation");
     if (!logged || !session) return;
     void api<{ conversation: { provider: string }; events: AppEvent[] }>(
-      "conversations/" + session,
+      "conversations/" + session
     )
       .then((result) => {
         setProvider(result.conversation.provider);
         setEvents((previous) =>
           [
             ...new Map(
-              [...previous, ...result.events].map((e) => [e.id, e]),
+              [...previous, ...result.events].map((e) => [e.id, e])
             ).values(),
-          ].sort((a, b) => a.id - b.id),
+          ].sort((a, b) => a.id - b.id)
         );
       })
       .catch((e) => setError(e.message));
@@ -255,7 +257,7 @@ function App() {
     obs &&
     !status?.robot_error &&
     Date.now() - (status?.received_at ?? 0) < 1500 &&
-    !obs.fault,
+    !obs.fault
   );
   const activeMove =
     obs?.operation?.status === "running" ||
@@ -307,16 +309,16 @@ function App() {
     encodeURIComponent(
       replay
         ? location.origin + "/api/recordings/" + replay + "/replay.rrd"
-        : "rerun+" + location.origin + "/proxy",
+        : "rerun+" + location.origin + "/proxy"
     );
   const chatEvents = events.filter(
     (e) =>
       e.type.startsWith("chat.") &&
       e.data.session_id === session &&
-      !["chat.delta", "chat.finished"].includes(e.type),
+      !["chat.delta", "chat.finished"].includes(e.type)
   );
   const lastPerception = events.findLast(
-    (e) => e.type === "perception.completed",
+    (e) => e.type === "perception.completed"
   );
   const moveJoint = async (j: (typeof joints)[number], delta: number) => {
     if (!obs) return;
@@ -610,7 +612,7 @@ function App() {
                       className="suggestion"
                       onClick={() =>
                         setMessage(
-                          "Inspect the robot state and describe what you can observe. Do not move yet.",
+                          "Inspect the robot state and describe what you can observe. Do not move yet."
                         )
                       }
                     >
@@ -786,7 +788,7 @@ function App() {
                 onClick={() => {
                   void run(
                     status.recording ? "recording_stop" : "recording_start",
-                    status.recording ? {} : { label: recordName },
+                    status.recording ? {} : { label: recordName }
                   );
                 }}
               >
@@ -951,8 +953,8 @@ function App() {
                             100,
                             ((obs.measured[j] - obs.limits[j][0]) /
                               (obs.limits[j][1] - obs.limits[j][0])) *
-                              100,
-                          ),
+                              100
+                          )
                         ) + "%"
                       : "50%",
                   }}
@@ -1082,5 +1084,5 @@ function App() {
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
-  </React.StrictMode>,
+  </React.StrictMode>
 );

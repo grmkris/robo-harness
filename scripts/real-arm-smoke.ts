@@ -1,7 +1,8 @@
+import { mkdir, writeFile } from "node:fs/promises";
+
 /** Explicit hardware acceptance: default observes; --move opens gripper <=2 percentage points. */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { mkdir, writeFile } from "node:fs/promises";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const url = process.env.ROBO_URL ?? "http://100.105.51.45:8940";
@@ -53,11 +54,11 @@ try {
       frame.data.clock_domain !== evidence.before.clock_domain
     )
       throw new Error(
-        "A fresh MCP image with matching robot clock domain is required",
+        "A fresh MCP image with matching robot clock domain is required"
       );
     await writeFile(
       folder + "/" + camera + ".jpg",
-      Buffer.from(image.data, "base64"),
+      Buffer.from(image.data, "base64")
     );
     evidence.frames[camera] = frame.data;
   }
@@ -99,14 +100,14 @@ try {
     evidence.measured_delta = evidence.after.measured.gripper - initial;
     if (evidence.measured_delta < 0.2 || evidence.measured_delta > 2.5)
       throw new Error(
-        "Measured gripper movement did not match the tiny opening test",
+        "Measured gripper movement did not match the tiny opening test"
       );
     for (const joint of Object.keys(evidence.before.measured).filter(
-      (j) => j !== "gripper",
+      (j) => j !== "gripper"
     ))
       if (
         Math.abs(
-          evidence.after.measured[joint] - evidence.before.measured[joint],
+          evidence.after.measured[joint] - evidence.before.measured[joint]
         ) > 0.8
       )
         throw new Error("Unexpected drift in " + joint);
@@ -125,7 +126,7 @@ try {
     recording = false;
     await Bun.sleep(1000);
     const replay = await fetch(
-      url + "/api/recordings/" + evidence.recording.id + "/replay.rrd",
+      url + "/api/recordings/" + evidence.recording.id + "/replay.rrd"
     );
     if (!replay.ok) throw new Error("Rerun replay is unavailable");
     evidence.replay_bytes = (await replay.arrayBuffer()).byteLength;
@@ -146,7 +147,7 @@ try {
   await writeFile(
     folder +
       (process.argv.includes("--move") ? "/motion.json" : "/observation.json"),
-    JSON.stringify(evidence, null, 2),
+    JSON.stringify(evidence, null, 2)
   );
   await client.close();
   console.log(
@@ -160,6 +161,6 @@ try {
       recording: evidence.recording,
       replay_bytes: evidence.replay_bytes,
       folder,
-    }),
+    })
   );
 }

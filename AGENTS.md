@@ -1,4 +1,5 @@
 # Robo Harness
+
 Standalone SO-101 playground. No runtime dependencies on Invok or the archived harness.
 
 - TypeScript: Bun, React/Vite, custom AI SDK loop. Python: LeRobot I/O and Rerun.

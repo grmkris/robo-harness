@@ -3,11 +3,23 @@ name = "robo-harness"
 version = "0.1.0"
 description = "LeRobot hardware owner and Rerun telemetry for Robo Harness"
 requires-python = ">=3.12"
-dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "numpy>=2,<3", "scipy>=1.14,<2", "pillow>=11,<13", "httpx>=0.28,<1", "rerun-sdk==0.30.1"]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "numpy>=2,<3",
+  "scipy>=1.14,<2",
+  "pillow>=11,<13",
+  "httpx>=0.28,<1",
+  "rerun-sdk==0.30.1",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
-hardware = ["lerobot==0.6.0", "opencv-python-headless>=4.10", "feetech-servo-sdk"]
+hardware = [
+  "lerobot==0.6.0",
+  "opencv-python-headless>=4.10",
+  "feetech-servo-sdk",
+]
 perception = ["torch>=2.7", "transformers>=4.57", "accelerate>=1"]
 
 [project.scripts]

@@ -16,8 +16,9 @@ export function isLoopback(ip: string) {
 export function isTailnetAddress(ip: string) {
   const address = normalize(ip);
   return (
-    /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/.test(address) ||
-    address.toLowerCase().startsWith("fd7a:115c:a1e0:")
+    /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/.test(
+      address
+    ) || address.toLowerCase().startsWith("fd7a:115c:a1e0:")
   );
 }
 export interface Trust {

@@ -1,10 +1,11 @@
-import type { Frame } from "../shared/contracts";
 import { tool, jsonSchema, type ToolSet } from "ai";
 import { z } from "zod";
+
+import type { Frame } from "../shared/contracts";
 import { toolSchemas, type ToolName } from "../shared/contracts";
-import * as robot from "./robot";
-import { startRecording, stopRecording } from "./recordings";
 import { perceive } from "./perception";
+import { startRecording, stopRecording } from "./recordings";
+import * as robot from "./robot";
 import { shell } from "./shell";
 export interface Principal {
   owner: string;
@@ -35,7 +36,7 @@ export async function executeTool(
   name: ToolName,
   raw: unknown,
   p: Principal,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<unknown> {
   signal?.throwIfAborted();
   const input = toolSchemas[name].parse(raw);
@@ -72,7 +73,7 @@ export function agentTools(
   p: Principal,
   signal: AbortSignal,
   vision: boolean,
-  onImage?: (frame: Frame) => void,
+  onImage?: (frame: Frame) => void
 ): ToolSet {
   return Object.fromEntries(
     (Object.keys(toolSchemas) as ToolName[]).map((name) => [
@@ -80,7 +81,7 @@ export function agentTools(
       tool({
         description: descriptions[name],
         inputSchema: jsonSchema<Record<string, unknown>>(
-          z.toJSONSchema(toolSchemas[name], { io: "input" }),
+          z.toJSONSchema(toolSchemas[name], { io: "input" })
         ),
         execute: async (input: Record<string, unknown>) => {
           try {
@@ -106,6 +107,6 @@ export function agentTools(
           value: JSON.stringify(output),
         }),
       }),
-    ]),
+    ])
   );
 }

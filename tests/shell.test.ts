@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { dockerArguments, shellNetwork } from "../src/server/shell-args";
 const base = {
   id: "abc",
@@ -35,7 +36,7 @@ describe("dockerArguments", () => {
     expect(
       dockerArguments({ ...base, network: "host" })[
         dockerArguments({ ...base, network: "host" }).indexOf("--network") + 1
-      ],
+      ]
     ).toBe("host");
   });
 });

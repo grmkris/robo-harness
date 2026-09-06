@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { toolSchemas, type ToolName } from "./shared/contracts";
+
 import { callTool } from "./client";
+import { toolSchemas, type ToolName } from "./shared/contracts";
 const server = new McpServer({ name: "robo-harness", version: "0.1.0" });
 for (const name of Object.keys(toolSchemas) as ToolName[]) {
   server.registerTool(
@@ -44,7 +45,7 @@ for (const name of Object.keys(toolSchemas) as ToolName[]) {
           ],
         };
       }
-    },
+    }
   );
 }
 await server.connect(new StdioServerTransport());

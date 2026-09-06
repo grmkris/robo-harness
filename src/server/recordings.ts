@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdir,
   writeFile,
@@ -6,11 +7,11 @@ import {
   readFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
-import { config } from "./config";
-import { db, emit } from "./store";
-import { freshObservation, currentFrames, clock, ApiError } from "./robot";
+
 import type { AppEvent } from "../shared/contracts";
+import { config } from "./config";
+import { freshObservation, currentFrames, clock, ApiError } from "./robot";
+import { db, emit } from "./store";
 export interface Recording {
   id: string;
   label: string;
@@ -75,12 +76,12 @@ export async function startRecording(label: string) {
             "Export with robo-export; raw samples preserve actual capture timestamps",
         },
         null,
-        2,
-      ),
+        2
+      )
     );
     active.state = "recording";
     db.query(
-      "INSERT INTO recordings(id,label,state,path,created) VALUES(?,?,?,?,?)",
+      "INSERT INTO recordings(id,label,state,path,created) VALUES(?,?,?,?,?)"
     ).run(id, label, "recording", path, created);
     known.clear();
     skipped = 0;
@@ -115,7 +116,7 @@ export async function recordSample() {
       if (!known.has(frame.id)) {
         await writeFile(
           join(record.path, "images", filename),
-          Buffer.from(frame.base64, "base64"),
+          Buffer.from(frame.base64, "base64")
         );
         known.add(frame.id);
       }
@@ -133,19 +134,19 @@ export async function recordSample() {
         images,
         clock,
         sample_time_ms: Date.now(),
-      }) + "\n",
+      }) + "\n"
     );
     record.frames++;
     db.query("UPDATE recordings SET frames=? WHERE id=?").run(
       record.frames,
-      record.id,
+      record.id
     );
   } catch (e) {
     record.state = "incomplete";
     record.error = e instanceof Error ? e.message : "Recording failed";
     db.query("UPDATE recordings SET state='incomplete',error=? WHERE id=?").run(
       record.error,
-      record.id,
+      record.id
     );
     emit("recording.error", { id: record.id, message: record.error });
   } finally {
@@ -166,7 +167,7 @@ export async function recordEvent(event: AppEvent) {
     if (/^[a-f0-9]{64}$/.test(hash)) {
       await writeFile(
         record.path + "/programs/" + hash + ".sh",
-        await readFile(config.dataDir + "/programs/" + hash + ".sh"),
+        await readFile(config.dataDir + "/programs/" + hash + ".sh")
       );
     }
   }
@@ -178,7 +179,7 @@ export async function stopRecording() {
   while (writing) await Bun.sleep(10);
   const record = active;
   const manifest = JSON.parse(
-    await readFile(record.path + "/manifest.json", "utf8"),
+    await readFile(record.path + "/manifest.json", "utf8")
   );
   record.finished = Date.now();
   record.state =
@@ -200,14 +201,14 @@ export async function stopRecording() {
         error: record.error,
       },
       null,
-      2,
-    ),
+      2
+    )
   );
   db.query("UPDATE recordings SET state=?,finished=?,error=? WHERE id=?").run(
     record.state,
     record.finished,
     record.error,
-    record.id,
+    record.id
   );
   active = null;
   stopping = false;

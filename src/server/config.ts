@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+
 import { isLoopback, isTailnetAddress } from "./access";
 export const root = resolve(import.meta.dir, "../..");
 export const dataDir = resolve(process.env.ROBO_DATA_DIR ?? root + "/var");
@@ -40,8 +41,8 @@ const trust = {
     (process.env.ROBO_TRUST_LOOPBACK !== "0" && isLoopback(host)),
   blocked: new Set(
     [new URL(ioUrl).hostname, piDevHost].filter(
-      (value) => value && !isLoopback(value),
-    ),
+      (value) => value && !isLoopback(value)
+    )
   ),
 };
 export const config = {

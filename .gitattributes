@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.lock binary
+*.png binary
+*.jpg binary

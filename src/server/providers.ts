@@ -1,5 +1,7 @@
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { readFile } from "node:fs/promises";
+
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+
 import type { ProviderInfo } from "../shared/contracts";
 import { ApiError } from "./robot";
 const alibaba =
@@ -11,7 +13,7 @@ async function xaiToken() {
   try {
     const file = JSON.parse(await readFile(path, "utf8"));
     const record = Object.entries(file).find(([key]) =>
-      key.startsWith("https://auth.x.ai::"),
+      key.startsWith("https://auth.x.ai::")
     )?.[1] as { key?: string; expires_at?: string | number } | undefined;
     if (!record?.key) return null;
     const expiry = record.expires_at;
@@ -93,13 +95,13 @@ export async function resolveModel(provider: string) {
               const token = await xaiToken();
               if (!token)
                 throw new Error(
-                  "xAI credentials expired; refresh using the owning Grok CLI",
+                  "xAI credentials expired; refresh using the owning Grok CLI"
                 );
               const headers = new Headers(init?.headers);
               headers.set("Authorization", "Bearer " + token);
               return fetch(input, { ...init, headers });
             },
-            { preconnect: fetch.preconnect },
+            { preconnect: fetch.preconnect }
           ),
         }
       : {}),

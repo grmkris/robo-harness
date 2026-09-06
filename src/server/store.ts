@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
-import { config } from "./config";
+
 import type { AppEvent } from "../shared/contracts";
+import { config } from "./config";
 export const db = new Database(config.dataDir + "/harness.sqlite", {
   create: true,
 });
@@ -13,7 +14,7 @@ db.exec(`
  CREATE TABLE IF NOT EXISTS perception(id TEXT PRIMARY KEY,state TEXT NOT NULL,source TEXT NOT NULL,result TEXT,error TEXT,created INTEGER NOT NULL);
 `);
 db.run(
-  "UPDATE recordings SET state='incomplete',error='Application restarted before finalization' WHERE state='recording'",
+  "UPDATE recordings SET state='incomplete',error='Application restarted before finalization' WHERE state='recording'"
 );
 const listeners = new Set<(event: AppEvent) => void>();
 export function emit(type: string, data: Record<string, unknown>) {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import {
   equal,
   isTailnetAddress,
@@ -18,7 +19,9 @@ describe("trustedSource", () => {
   test("never trusts the robot host and trusts loopback only when bound there", () => {
     expect(trustedSource("100.77.154.45", trust)).toBe(false);
     expect(trustedSource("127.0.0.1", trust)).toBe(false);
-    expect(trustedSource("::ffff:127.0.0.1", { ...trust, loopback: true })).toBe(true);
+    expect(
+      trustedSource("::ffff:127.0.0.1", { ...trust, loopback: true })
+    ).toBe(true);
   });
   test("bounds the CGNAT range precisely", () => {
     expect(isTailnetAddress("100.64.0.0")).toBe(true);

@@ -1,15 +1,16 @@
-import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { issueCapability } from "./capabilities";
+import { mkdir, writeFile } from "node:fs/promises";
+
 import { isLoopback } from "./access";
+import { issueCapability } from "./capabilities";
 import { config } from "./config";
+import { ApiError } from "./robot";
 import { dockerArguments, shellNetwork } from "./shell-args";
 import { emit } from "./store";
-import { ApiError } from "./robot";
 export async function shell(
   input: { command: string; host: "netcup" | "pi"; timeout_s: number },
   owner: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ) {
   const id = crypto.randomUUID();
   const workspace =
@@ -27,7 +28,7 @@ export async function shell(
     if (!host)
       throw new ApiError(
         "Configure a dedicated Pi development SSH account first",
-        422,
+        422
       );
     if (!/^[a-zA-Z0-9_.@-]+$/.test(host))
       throw new ApiError("Invalid configured Pi development host", 422);
@@ -54,7 +55,7 @@ export async function shell(
     if (!programUrl)
       throw new ApiError(
         "Set ROBO_PROGRAM_URL to an address containers can reach, or bind the application to a tailnet address",
-        422,
+        422
       );
     command = dockerArguments({
       id,
@@ -80,7 +81,7 @@ export async function shell(
           token: capability.token,
           url: process.env.ROBO_PI_PROGRAM_URL ?? "",
         })
-      : input.command,
+      : input.command
   );
   proc.stdin.end();
   let killed = false;

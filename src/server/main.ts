@@ -1,16 +1,18 @@
-import { getCapability, sweepCapabilities } from "./capabilities";
 import { resolve, sep } from "node:path";
-import { equal, parseCursor, trustedSource } from "./access";
-import { config } from "./config";
+
 import { z } from "zod";
-import { db, events, subscribe } from "./store";
-import * as robot from "./robot";
-import { catalog } from "./providers";
-import * as agent from "./agent";
-import * as recording from "./recordings";
-import { budget, setBudget, perceptionConfig } from "./perception";
-import { executeTool, type Principal } from "./tools";
+
 import { toolSchemas, type ToolName } from "../shared/contracts";
+import { equal, parseCursor, trustedSource } from "./access";
+import * as agent from "./agent";
+import { getCapability, sweepCapabilities } from "./capabilities";
+import { config } from "./config";
+import { budget, setBudget, perceptionConfig } from "./perception";
+import { catalog } from "./providers";
+import * as recording from "./recordings";
+import * as robot from "./robot";
+import { db, events, subscribe } from "./store";
+import { executeTool, type Principal } from "./tools";
 
 const sessions = new Map<string, { owner: string; expires: number }>();
 let telemetry = {
@@ -91,7 +93,8 @@ const failedLogins = new Map<string, { count: number; until: number }>();
 // Login sessions, throttle records and program capabilities are keyed by
 // untrusted input, so without a sweep each one grows for the life of the process.
 export function sweep(now = Date.now()) {
-  for (const [key, value] of sessions) if (value.expires <= now) sessions.delete(key);
+  for (const [key, value] of sessions)
+    if (value.expires <= now) sessions.delete(key);
   for (const [key, value] of failedLogins)
     if (value.until <= now) failedLogins.delete(key);
   sweepCapabilities(now);
@@ -151,7 +154,7 @@ async function handle(req: Request): Promise<Response> {
     }
     const results = db
       .query(
-        "SELECT id,result FROM perception WHERE state='completed' ORDER BY created DESC LIMIT 8",
+        "SELECT id,result FROM perception WHERE state='completed' ORDER BY created DESC LIMIT 8"
       )
       .all() as { id: string; result: string }[];
     return json({
@@ -196,15 +199,15 @@ async function handle(req: Request): Promise<Response> {
               }
               controller.enqueue(
                 new TextEncoder().encode(
-                  "data: " + JSON.stringify(value) + "\n\n",
-                ),
+                  "data: " + JSON.stringify(value) + "\n\n"
+                )
               );
             } catch {
               cleanup();
             }
           };
           const after = parseCursor(
-            req.headers.get("last-event-id") ?? url.searchParams.get("after"),
+            req.headers.get("last-event-id") ?? url.searchParams.get("after")
           );
           for (const event of events(after)) send(event);
           const off = subscribe(send),
@@ -240,7 +243,7 @@ async function handle(req: Request): Promise<Response> {
       if ("program" in principal && name === "shell")
         throw new robot.ApiError("Nested development shells are disabled", 403);
       return json(
-        await executeTool(name, await parse(req), principal, req.signal),
+        await executeTool(name, await parse(req), principal, req.signal)
       );
     }
     if (path.startsWith("/api/cameras/")) {
@@ -259,9 +262,7 @@ async function handle(req: Request): Promise<Response> {
     if (path === "/api/budget" && req.method === "POST") {
       requireHuman(principal);
       return json(
-        setBudget(
-          z.object({ limit: z.number() }).parse(await parse(req)).limit,
-        ),
+        setBudget(z.object({ limit: z.number() }).parse(await parse(req)).limit)
       );
     }
     if (path === "/api/conversations") return json(agent.conversations());
@@ -276,7 +277,7 @@ async function handle(req: Request): Promise<Response> {
         throw new robot.ApiError("Conversation not found", 404);
       const rows = db
         .query(
-          "SELECT id,time,type,data FROM events WHERE json_extract(data,'$.session_id')=? AND type!='chat.delta' ORDER BY id DESC LIMIT 500",
+          "SELECT id,time,type,data FROM events WHERE json_extract(data,'$.session_id')=? AND type!='chat.delta' ORDER BY id DESC LIMIT 500"
         )
         .all(id) as Array<{
         id: number;
@@ -299,13 +300,13 @@ async function handle(req: Request): Promise<Response> {
         })
         .parse(await parse(req));
       return json(
-        await agent.startChat(body.provider, body.text, body.session_id),
+        await agent.startChat(body.provider, body.text, body.session_id)
       );
     }
     if (path === "/api/chat/cancel" && req.method === "POST") {
       requireHuman(principal);
       return json(
-        agent.cancel(z.object({ id: z.string() }).parse(await parse(req)).id),
+        agent.cancel(z.object({ id: z.string() }).parse(await parse(req)).id)
       );
     }
     if (path === "/api/chat/steer" && req.method === "POST") {
@@ -322,12 +323,12 @@ async function handle(req: Request): Promise<Response> {
       if (!z.string().uuid().safeParse(id).success)
         return json({ error: "Invalid recording" }, 400);
       const file = Bun.file(
-        config.dataDir + "/recordings/" + id + "/replay.rrd",
+        config.dataDir + "/recordings/" + id + "/replay.rrd"
       );
       if (!(await file.exists()))
         return json(
           { error: "Rerun replay is not available for this recording" },
-          404,
+          404
         );
       return new Response(file, {
         headers: { "Content-Type": "application/octet-stream" },
@@ -338,7 +339,7 @@ async function handle(req: Request): Promise<Response> {
       if (!z.string().uuid().safeParse(id).success)
         return json({ error: "Invalid artifact" }, 400);
       const file = Bun.file(
-        config.dataDir + "/perception/" + id + "/preview.png",
+        config.dataDir + "/perception/" + id + "/preview.png"
       );
       return (await file.exists())
         ? new Response(file)
@@ -369,7 +370,7 @@ async function handle(req: Request): Promise<Response> {
           body: ["GET", "HEAD"].includes(req.method) ? undefined : req.body,
           signal: req.signal,
           duplex: "half",
-        } as RequestInit,
+        } as RequestInit
       );
       const headers = new Headers(response.headers);
       headers.delete("content-encoding");
@@ -390,7 +391,7 @@ async function handle(req: Request): Promise<Response> {
     ? new Response(index)
     : new Response(
         "Frontend not built. Run bun run build or open the Vite development URL.",
-        { status: 503 },
+        { status: 503 }
       );
 }
 export const server = Bun.serve({
@@ -408,13 +409,13 @@ export const server = Bun.serve({
             error: "Invalid request",
             issues: e.issues.map((i) => ({ path: i.path, message: i.message })),
           },
-          400,
+          400
         );
       if (e instanceof robot.ApiError)
         return json({ error: e.message }, e.status);
       return json(
         { error: "Service request failed; check component status" },
-        502,
+        502
       );
     }
   },
@@ -432,7 +433,7 @@ const sampler = setInterval(() => {
     .catch((e: unknown) => {
       console.error(
         "Sampler failure:",
-        e instanceof Error ? e.message : String(e),
+        e instanceof Error ? e.message : String(e)
       );
     })
     .finally(() => {
@@ -443,14 +444,14 @@ subscribe((event) => {
   void recording.recordEvent(event).catch(() => {});
 });
 console.log(
-  "Robo Harness listening on http://" + config.host + ":" + config.port,
+  "Robo Harness listening on http://" + config.host + ":" + config.port
 );
 console.log(
   config.accessMode === "tailnet"
     ? "Tailscale access enabled; no operator login."
     : "Operator token is stored in " +
         config.dataDir +
-        "/operator-token (not printed).",
+        "/operator-token (not printed)."
 );
 async function shutdown() {
   clearInterval(sampler);

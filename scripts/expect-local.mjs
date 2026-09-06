@@ -7,11 +7,11 @@ globalThis.fetch = (input, init) => {
       ? input
       : input instanceof URL
         ? input.href
-        : input.url,
+        : input.url
   );
   if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
     return Promise.reject(
-      new Error("External CLI fetch disabled for local validation"),
+      new Error("External CLI fetch disabled for local validation")
     );
   }
   return nativeFetch(input, init);

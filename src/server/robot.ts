@@ -1,6 +1,5 @@
-import { config } from "./config";
-import { emit } from "./store";
 import type { z } from "zod";
+
 import type {
   Observation,
   Frame,
@@ -9,11 +8,13 @@ import type {
   Operation,
   moveSchema,
 } from "../shared/contracts";
+import { config } from "./config";
+import { emit } from "./store";
 export type MoveInput = z.infer<typeof moveSchema>;
 export class ApiError extends Error {
   constructor(
     message: string,
-    public status = 409,
+    public status = 409
   ) {
     super(message);
   }
@@ -21,7 +22,7 @@ export class ApiError extends Error {
 export async function io<T>(
   path: string,
   body?: unknown,
-  timeoutMs = 2000,
+  timeoutMs = 2000
 ): Promise<T> {
   const res = await fetch(config.ioUrl + path, {
     method: body === undefined ? "GET" : "POST",
@@ -124,19 +125,19 @@ export async function capture(camera: string, frameId?: string) {
   return await io<Frame>(
     "/frames/" +
       encodeURIComponent(camera) +
-      (frameId ? "?frame_id=" + encodeURIComponent(frameId) : ""),
+      (frameId ? "?frame_id=" + encodeURIComponent(frameId) : "")
   );
 }
 export async function acquire(
   owner: string,
   mode: string,
   takeover: boolean,
-  human: boolean,
+  human: boolean
 ) {
   if (!human && (mode !== "agent" || takeover))
     throw new ApiError(
       "Only a human operator can take over or enable leader mode",
-      403,
+      403
     );
   refuseWhileStopping();
   const lease = await io<Lease>("/control/acquire", { owner, mode, takeover });
@@ -195,7 +196,7 @@ export async function move(owner: string, body: MoveInput) {
       if (value < min || value > max)
         throw new ApiError(
           `Target for ${joint} (${value}) is outside the commissioned range ${min}..${max}`,
-          422,
+          422
         );
     }
   }
@@ -232,7 +233,7 @@ export async function stop() {
       "Robot did not confirm the stop (" +
         message +
         "); local control is revoked and motion expires with the lease",
-      502,
+      502
     );
   } finally {
     stopping = false;

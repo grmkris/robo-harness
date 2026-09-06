@@ -64,7 +64,7 @@ test("expired program credentials cannot become an operator and foreign origins 
       await fetch(base + "/api/status", {
         headers: { Authorization: "Bearer expired-program" },
       })
-    ).status,
+    ).status
   ).toBe(401);
   const r = await fetch(base + "/api/tool/stop", {
     method: "POST",

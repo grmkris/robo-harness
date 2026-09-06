@@ -1,8 +1,10 @@
-import { z } from "zod";
-import { db, emit } from "./store";
-import { capture, ApiError } from "./robot";
 import { mkdir, writeFile } from "node:fs/promises";
+
+import { z } from "zod";
+
 import { config } from "./config";
+import { capture, ApiError } from "./robot";
+import { db, emit } from "./store";
 export const resultSchema = z.object({
   kind: z.enum(["segment", "depth"]),
   model: z.string(),
@@ -17,7 +19,7 @@ export const resultSchema = z.object({
         png: z.string(),
         label: z.string(),
         score: z.number().optional(),
-      }),
+      })
     )
     .optional(),
   depth: z.array(z.array(z.number().finite()).max(2048)).max(2048).optional(),
@@ -38,7 +40,7 @@ export function setBudget(limit: number) {
   if (existing && limit < existing.spent_usd)
     throw new ApiError("Budget cannot be below already reserved spending");
   db.query(
-    "INSERT INTO budgets(id,limit_usd,spent_usd) VALUES(1,?,0) ON CONFLICT(id) DO UPDATE SET limit_usd=excluded.limit_usd",
+    "INSERT INTO budgets(id,limit_usd,spent_usd) VALUES(1,?,0) ON CONFLICT(id) DO UPDATE SET limit_usd=excluded.limit_usd"
   ).run(limit);
   emit("budget.updated", { limit_usd: limit });
   return budget();
@@ -46,7 +48,7 @@ export function setBudget(limit: number) {
 export function perceptionConfig() {
   return {
     configured: Boolean(
-      process.env.ROBO_PERCEPTION_URL || process.env.ROBO_FAL_ENDPOINT,
+      process.env.ROBO_PERCEPTION_URL || process.env.ROBO_FAL_ENDPOINT
     ),
     provider: process.env.ROBO_FAL_ENDPOINT ? "fal" : "worker",
     cost_usd: Number(process.env.ROBO_PERCEPTION_COST_USD ?? 0),
@@ -60,23 +62,23 @@ export async function perceive(
     prompt: string;
     frame_id?: string;
   },
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ) {
   const settings = perceptionConfig();
   if (!settings.configured)
     throw new ApiError(
       "Configure a perception worker or compatible fal endpoint first",
-      422,
+      422
     );
   if (!Number.isFinite(settings.cost_usd) || settings.cost_usd <= 0)
     throw new ApiError(
       "Configure a conservative maximum cost per request before enabling paid perception",
-      422,
+      422
     );
   const frame = await capture(input.camera, input.frame_id);
   const reserve = db
     .query(
-      "UPDATE budgets SET spent_usd=spent_usd+? WHERE id=1 AND spent_usd+?<=limit_usd",
+      "UPDATE budgets SET spent_usd=spent_usd+? WHERE id=1 AND spent_usd+?<=limit_usd"
     )
     .run(settings.cost_usd, settings.cost_usd);
   if (reserve.changes !== 1)
@@ -84,7 +86,7 @@ export async function perceive(
   const id = crypto.randomUUID();
   const source = { ...frame, base64: undefined };
   db.query(
-    "INSERT INTO perception(id,state,source,created) VALUES(?,?,?,?)",
+    "INSERT INTO perception(id,state,source,created) VALUES(?,?,?,?)"
   ).run(id, "running", JSON.stringify(source), Date.now());
   emit("perception.started", { id, kind: input.kind, frame_id: frame.id });
   const combined = AbortSignal.any([
@@ -165,11 +167,11 @@ export async function perceive(
           },
           body: JSON.stringify(body),
           signal: combined,
-        },
+        }
       );
       if (!response.ok)
         throw new Error(
-          "Perception worker failed with status " + response.status,
+          "Perception worker failed with status " + response.status
         );
       charged = true;
       raw = await response.json();
@@ -177,7 +179,7 @@ export async function perceive(
     const result = resultSchema.parse(raw);
     if (result.frame_id !== frame.id || result.kind !== input.kind)
       throw new Error(
-        "Perception response does not match source frame or requested capability",
+        "Perception response does not match source frame or requested capability"
       );
     if (result.width !== frame.width || result.height !== frame.height)
       throw new Error("Perception image geometry does not match source frame");
@@ -185,15 +187,15 @@ export async function perceive(
     await mkdir(path, { recursive: true });
     await writeFile(
       path + "/preview.png",
-      Buffer.from(result.preview_png, "base64"),
+      Buffer.from(result.preview_png, "base64")
     );
     await writeFile(
       path + "/result.json",
-      JSON.stringify({ ...result, source, completed_ms: Date.now() }),
+      JSON.stringify({ ...result, source, completed_ms: Date.now() })
     );
     db.query("UPDATE perception SET state='completed',result=? WHERE id=?").run(
       JSON.stringify({ ...result, source, completed_ms: Date.now() }),
-      id,
+      id
     );
     emit("perception.completed", {
       id,
@@ -206,11 +208,11 @@ export async function perceive(
     const message = e instanceof Error ? e.message : "Perception failed";
     if (!charged)
       db.query(
-        "UPDATE budgets SET spent_usd=MAX(0,spent_usd-?) WHERE id=1",
+        "UPDATE budgets SET spent_usd=MAX(0,spent_usd-?) WHERE id=1"
       ).run(settings.cost_usd);
     db.query("UPDATE perception SET state='failed',error=? WHERE id=?").run(
       message,
-      id,
+      id
     );
     emit("perception.failed", { id, message });
     throw new ApiError(message, 502);

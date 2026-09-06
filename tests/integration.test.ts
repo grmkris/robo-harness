@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 const root = join(import.meta.dir, "..");
@@ -21,7 +22,7 @@ async function request(
   path: string,
   body?: unknown,
   token = operator,
-  headers: Record<string, string> = {},
+  headers: Record<string, string> = {}
 ) {
   return fetch(base + path, {
     method: body === undefined ? "GET" : "POST",
@@ -123,7 +124,7 @@ beforeAll(async () => {
       return new Response(
         chunks.map((c) => "data: " + JSON.stringify(c) + "\n\n").join("") +
           "data: [DONE]\n\n",
-        { headers: { "Content-Type": "text/event-stream" } },
+        { headers: { "Content-Type": "text/event-stream" } }
       );
     },
   });
@@ -140,7 +141,7 @@ beforeAll(async () => {
       env: { ...process.env, ROBO_IO_TOKEN: ioToken },
       stdout: "ignore",
       stderr: "pipe",
-    },
+    }
   );
   app = Bun.spawn(["bun", "src/server/main.ts"], {
     cwd: root,
@@ -186,21 +187,21 @@ afterAll(async () => {
 describe("mock HTTP integration", () => {
   test("requires authentication and rejects cross-origin control", async () => {
     expect((await request("/api/status", undefined, "incorrect")).status).toBe(
-      401,
+      401
     );
     expect(
       (
         await request("/api/tool/stop", {}, operator, {
           Origin: "https://untrusted.example",
         })
-      ).status,
+      ).status
     ).toBe(403);
     expect(
       (
         await request("/api/login", { token: operator }, operator, {
           Origin: base,
         })
-      ).status,
+      ).status
     ).toBe(200);
     // A rebound hostname matches its own Host-derived origin; only the allowlist may decide.
     expect(
@@ -209,14 +210,14 @@ describe("mock HTTP integration", () => {
           Host: "rebound.example:" + appPort,
           Origin: "http://rebound.example:" + appPort,
         })
-      ).status,
+      ).status
     ).toBe(403);
   });
   test("malformed credentials and prototype names are refused, not crashed", async () => {
     expect((await request("/api/status", undefined, "ü")).status).toBe(401);
     expect(
       (await request("/api/login", { token: "üü" }, "ü", { Origin: base }))
-        .status,
+        .status
     ).toBe(401);
     expect((await call("constructor")).status).toBe(404);
     expect((await call("__proto__")).status).toBe(404);
@@ -224,22 +225,22 @@ describe("mock HTTP integration", () => {
   test("agents cannot impersonate humans or increase compute budgets", async () => {
     expect(
       (await call("acquire", { mode: "human", takeover: true }, agentToken))
-        .status,
+        .status
     ).toBe(403);
     expect(
-      (await request("/api/budget", { limit: 10 }, agentToken)).status,
+      (await request("/api/budget", { limit: 10 }, agentToken)).status
     ).toBe(403);
   });
   test("bounded move, idempotency, measured completion and takeover", async () => {
     await call("stop");
     expect((await call("acquire", { mode: "agent" }, agentToken)).status).toBe(
-      200,
+      200
     );
     const obs = (await call("observe", {}, agentToken)).data;
     const wild = await call(
       "move",
       { request_id: crypto.randomUUID(), target: { shoulder_pan: 10000 } },
-      agentToken,
+      agentToken
     );
     expect(wild.status).toBe(422);
     expect(wild.data.error).toContain("shoulder_pan");
@@ -255,7 +256,7 @@ describe("mock HTTP integration", () => {
     await until(
       async () =>
         (await call("operation", { id: first.data.id })).data.status ===
-        "completed",
+        "completed"
     );
     const next = await call(
       "move",
@@ -264,36 +265,40 @@ describe("mock HTTP integration", () => {
         target: { shoulder_pan: 2 },
         duration_s: 2,
       },
-      agentToken,
+      agentToken
     );
     expect(
-      (await call("acquire", { mode: "human", takeover: true })).status,
+      (await call("acquire", { mode: "human", takeover: true })).status
     ).toBe(200);
     expect((await call("operation", { id: next.data.id })).data.status).toBe(
-      "cancelled",
+      "cancelled"
     );
     expect((await call("renew", {}, agentToken)).status).toBe(409);
     await call("release");
   });
   test("stop cancels a running move, revokes control and allows a fresh acquire", async () => {
     expect((await call("acquire", { mode: "agent" }, agentToken)).status).toBe(
-      200,
+      200
     );
     const running = await call(
       "move",
-      { request_id: crypto.randomUUID(), target: { shoulder_pan: -3 }, duration_s: 3 },
-      agentToken,
+      {
+        request_id: crypto.randomUUID(),
+        target: { shoulder_pan: -3 },
+        duration_s: 3,
+      },
+      agentToken
     );
     expect(running.status).toBe(200);
     expect((await call("stop")).status).toBe(200);
     expect((await call("operation", { id: running.data.id })).data.status).toBe(
-      "cancelled",
+      "cancelled"
     );
     // observe reports the last 100 ms sample, which may predate the stop.
     await until(async () => (await call("observe")).data.operator === null);
     expect((await call("renew", {}, agentToken)).status).toBe(409);
     expect((await call("acquire", { mode: "agent" }, agentToken)).status).toBe(
-      200,
+      200
     );
     await call("release", {}, agentToken);
   });
@@ -306,19 +311,19 @@ describe("mock HTTP integration", () => {
         target: { shoulder_pan: 5 },
         duration_s: 5,
       },
-      agentToken,
+      agentToken
     );
     await until(
       async () =>
         (await call("operation", { id: result.data.id })).data.status ===
         "cancelled",
-      5000,
+      5000
     );
     expect((await call("observe")).data.operator).toBeNull();
     const late = await call(
       "move",
       { request_id: crypto.randomUUID(), target: { shoulder_pan: 1 } },
-      agentToken,
+      agentToken
     );
     expect(late.status).toBe(409);
     expect(late.data.error).toContain("expired");
@@ -328,10 +333,10 @@ describe("mock HTTP integration", () => {
     expect(frame.data.media_type).toBe("image/jpeg");
     expect(frame.data.id).toContain("workspace");
     expect(Buffer.from(frame.data.base64, "base64").length).toBeGreaterThan(
-      100,
+      100
     );
     expect(
-      (await call("perceive", { camera: "workspace", kind: "depth" })).status,
+      (await call("perceive", { camera: "workspace", kind: "depth" })).status
     ).toBe(402);
   });
   test("perception budgets are enforced atomically and wrong frames are rejected", async () => {
@@ -360,7 +365,7 @@ describe("mock HTTP integration", () => {
     expect(bad.data.error).toContain("source frame");
     expect(await spent()).toBeCloseTo(0.02, 6);
     expect(
-      (await call("perceive", { camera: "workspace", kind: "depth" })).status,
+      (await call("perceive", { camera: "workspace", kind: "depth" })).status
     ).toBe(402);
     expect((await request("/api/budget", { limit: 0.001 })).status).toBe(409);
   });
@@ -368,14 +373,14 @@ describe("mock HTTP integration", () => {
     const started = await call("recording_start", { label: "integration" });
     expect(started.status).toBe(200);
     expect((await call("recording_start", { label: "duplicate" })).status).toBe(
-      409,
+      409
     );
     await Bun.sleep(700);
     const stopped = await call("recording_stop");
     expect(stopped.data.frames).toBeGreaterThan(2);
     expect(stopped.data.state).toBe("captured");
     const manifest = JSON.parse(
-      await readFile(stopped.data.path + "/manifest.json", "utf8"),
+      await readFile(stopped.data.path + "/manifest.json", "utf8")
     );
     expect(manifest.backend).toBe("mock");
     expect(manifest.urdf_sha256).toHaveLength(64);
@@ -420,7 +425,9 @@ describe("mock HTTP integration", () => {
         await request("/api/telemetry?after=" + after, undefined, workerToken)
       ).json()) as { events: Array<{ id: number }> };
     expect((await page("abc")).events.length).toBeGreaterThan(0);
-    expect((await page("abc")).events[0].id).toBe((await page("0")).events[0].id);
+    expect((await page("abc")).events[0].id).toBe(
+      (await page("0")).events[0].id
+    );
     expect((await page("999999999")).events.length).toBe(0);
   });
   test("MCP serves the same observation and image capabilities", async () => {
@@ -430,8 +437,8 @@ describe("mock HTTP integration", () => {
       env: {
         ...Object.fromEntries(
           Object.entries(process.env).filter(
-            (p): p is [string, string] => typeof p[1] === "string",
-          ),
+            (p): p is [string, string] => typeof p[1] === "string"
+          )
         ),
         ROBO_URL: base,
         ROBO_TOKEN: agentToken,
@@ -443,7 +450,7 @@ describe("mock HTTP integration", () => {
     try {
       await client.connect(transport);
       expect(
-        (await client.listTools()).tools.some((t) => t.name === "robot_move"),
+        (await client.listTools()).tools.some((t) => t.name === "robot_move")
       ).toBe(true);
       const result = await client.callTool({
         name: "robot_capture",
@@ -451,8 +458,8 @@ describe("mock HTTP integration", () => {
       });
       expect(
         (result.content as Array<{ type: string }>).some(
-          (c) => c.type === "image",
-        ),
+          (c) => c.type === "image"
+        )
       ).toBe(true);
     } finally {
       await client.close();

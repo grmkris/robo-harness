@@ -48,7 +48,8 @@ export function dockerArguments(o: DockerShellOptions): string[] {
   ];
 }
 export function shellNetwork(value: string | undefined): ShellNetwork {
-  if (value === undefined || value === "" || value === "bridge") return "bridge";
+  if (value === undefined || value === "" || value === "bridge")
+    return "bridge";
   if (value === "host") return "host";
   throw new Error("ROBO_SHELL_NETWORK must be bridge or host");
 }

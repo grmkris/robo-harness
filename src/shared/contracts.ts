@@ -91,7 +91,7 @@ export const moveSchema = z
   .strict()
   .refine(
     (v) => (v.target === undefined) !== (v.xyz === undefined),
-    "Specify joints or Cartesian target",
+    "Specify joints or Cartesian target"
   );
 export const toolSchemas = {
   observe: z.object({}),
