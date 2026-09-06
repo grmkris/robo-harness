@@ -1,4 +1,4 @@
-import { getCapability } from "./capabilities";
+import { getCapability, sweepCapabilities } from "./capabilities";
 import { resolve, sep } from "node:path";
 import { equal, trustedSource } from "./access";
 import { config } from "./config";
@@ -88,6 +88,15 @@ const status = async () => ({
   budget: budget(),
 });
 const failedLogins = new Map<string, { count: number; until: number }>();
+// Login sessions, throttle records and program capabilities are keyed by
+// untrusted input, so without a sweep each one grows for the life of the process.
+export function sweep(now = Date.now()) {
+  for (const [key, value] of sessions) if (value.expires <= now) sessions.delete(key);
+  for (const [key, value] of failedLogins)
+    if (value.until <= now) failedLogins.delete(key);
+  sweepCapabilities(now);
+}
+const sweeper = setInterval(sweep, 60000);
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url),
     path = url.pathname;
@@ -447,6 +456,7 @@ console.log(
 );
 async function shutdown() {
   clearInterval(sampler);
+  clearInterval(sweeper);
   await robot.stop().catch(() => {});
   if (recording.active) await recording.stopRecording().catch(() => {});
   for (const id of agent.running()) agent.cancel(id);

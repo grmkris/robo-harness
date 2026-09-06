@@ -17,3 +17,10 @@ export function getCapability(token: string) {
   }
   return { owner: value.owner, human: false, program: true };
 }
+// Expired tokens are otherwise only removed when presented; the sweeper keeps a
+// forgotten issue from lingering for the life of the process.
+export function sweepCapabilities(now = Date.now()) {
+  for (const [token, value] of capabilities)
+    if (value.expires < now) capabilities.delete(token);
+  return capabilities.size;
+}
