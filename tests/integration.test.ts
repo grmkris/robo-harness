@@ -214,6 +214,13 @@ describe("mock HTTP integration", () => {
       200,
     );
     const obs = (await call("observe", {}, agentToken)).data;
+    const wild = await call(
+      "move",
+      { request_id: crypto.randomUUID(), target: { shoulder_pan: 10000 } },
+      agentToken,
+    );
+    expect(wild.status).toBe(422);
+    expect(wild.data.error).toContain("shoulder_pan");
     const body = {
       request_id: crypto.randomUUID(),
       target: { gripper: obs.measured.gripper + 2 },
@@ -264,6 +271,13 @@ describe("mock HTTP integration", () => {
       5000,
     );
     expect((await call("observe")).data.operator).toBeNull();
+    const late = await call(
+      "move",
+      { request_id: crypto.randomUUID(), target: { shoulder_pan: 1 } },
+      agentToken,
+    );
+    expect(late.status).toBe(409);
+    expect(late.data.error).toContain("expired");
   }, 7000);
   test("capture returns image provenance and no paid inference is implicit", async () => {
     const frame = await call("capture", { camera: "workspace" });

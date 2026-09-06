@@ -1,6 +1,15 @@
 import { config } from "./config";
 import { emit } from "./store";
-import type { Observation, Frame, Lease, Operation } from "../shared/contracts";
+import type { z } from "zod";
+import type {
+  Observation,
+  Frame,
+  Joint,
+  Lease,
+  Operation,
+  moveSchema,
+} from "../shared/contracts";
+export type MoveInput = z.infer<typeof moveSchema>;
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -132,9 +141,19 @@ export async function acquire(
   emit("control.acquired", { owner, mode, takeover });
   return lease;
 }
-export async function renew(owner: string) {
+// A lease the robot has already expired must never be presented again: the Python
+// engine would refuse it, but refusing here keeps the wire quiet and the error precise.
+function liveController(owner: string) {
   const c = controllers.get(owner);
   if (!c) throw new ApiError("Acquire control first");
+  if (c.expires <= Date.now()) {
+    controllers.delete(owner);
+    throw new ApiError("Control lease expired; acquire control again", 409);
+  }
+  return c;
+}
+export async function renew(owner: string) {
+  const c = liveController(owner);
   const lease = await io<Lease>("/control/renew", {
     owner,
     lease_id: c.lease.lease_id,
@@ -151,11 +170,27 @@ export async function release(owner: string) {
     controllers.delete(owner);
   }
 }
-export async function move(owner: string, body: unknown) {
-  const c = controllers.get(owner);
-  if (!c) throw new ApiError("Acquire control first");
+export async function move(owner: string, body: MoveInput) {
+  const c = liveController(owner);
+  if (body.target) {
+    // The observation carries the commissioned limits; a target outside them is
+    // refused before it reaches the motor owner, naming the joint.
+    const limits = freshObservation().limits;
+    for (const [joint, value] of Object.entries(body.target) as Array<
+      [Joint, number]
+    >) {
+      const range = limits[joint];
+      if (!range) throw new ApiError("Unknown joint " + joint, 422);
+      const [min, max] = range;
+      if (value < min || value > max)
+        throw new ApiError(
+          `Target for ${joint} (${value}) is outside the commissioned range ${min}..${max}`,
+          422,
+        );
+    }
+  }
   const op = await io<Operation>("/operations", {
-    ...(body as object),
+    ...body,
     owner,
     lease_id: c.lease.lease_id,
   });

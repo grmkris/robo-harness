@@ -53,7 +53,7 @@ export async function executeTool(
     case "release":
       return robot.release(p.owner);
     case "move":
-      return robot.move(p.owner, input);
+      return robot.move(p.owner, input as robot.MoveInput);
     case "operation":
       return robot.operation((input as { id: string }).id);
     case "stop":
