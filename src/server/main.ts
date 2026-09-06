@@ -1,6 +1,6 @@
 import { getCapability, sweepCapabilities } from "./capabilities";
 import { resolve, sep } from "node:path";
-import { equal, trustedSource } from "./access";
+import { equal, parseCursor, trustedSource } from "./access";
 import { config } from "./config";
 import { z } from "zod";
 import { db, events, subscribe } from "./store";
@@ -159,7 +159,7 @@ async function handle(req: Request): Promise<Response> {
       received_at: robot.receivedAt,
       frames: robot.currentFrames,
       clock: robot.clock,
-      events: events(Number(url.searchParams.get("after") ?? 0), 200),
+      events: events(parseCursor(url.searchParams.get("after")), 200),
       recording: recording.active,
       perception: results.map((r) => ({ id: r.id, ...JSON.parse(r.result) })),
     });
@@ -203,10 +203,8 @@ async function handle(req: Request): Promise<Response> {
               cleanup();
             }
           };
-          const after = Number(
-            req.headers.get("last-event-id") ??
-              url.searchParams.get("after") ??
-              0,
+          const after = parseCursor(
+            req.headers.get("last-event-id") ?? url.searchParams.get("after"),
           );
           for (const event of events(after)) send(event);
           const off = subscribe(send),

@@ -10,6 +10,7 @@ const appPort = 18940,
 const operator = "integration-operator-token-not-a-real-secret";
 const agentToken = "integration-agent-token-not-a-real-secret";
 const ioToken = "integration-io-token-not-a-real-secret";
+const workerToken = "integration-worker-token-not-a-real-secret";
 let directory = "",
   app: ReturnType<typeof Bun.spawn>,
   io: ReturnType<typeof Bun.spawn>,
@@ -152,6 +153,7 @@ beforeAll(async () => {
       ROBO_TOKEN: operator,
       ROBO_AGENT_TOKEN: agentToken,
       ROBO_IO_TOKEN: ioToken,
+      ROBO_WORKER_TOKEN: workerToken,
       ROBO_IO_URL: "http://127.0.0.1:" + ioPort,
       DASHSCOPE_API_KEY: "fixture-key-not-real",
       ROBO_ALIBABA_URL: "http://127.0.0.1:" + fixture.port,
@@ -411,6 +413,15 @@ describe("mock HTTP integration", () => {
       await request("/api/conversations")
     ).json()) as Array<{ id: string }>;
     expect(history.some((c) => c.id === session.session_id)).toBe(true);
+  });
+  test("a malformed event cursor replays from the beginning", async () => {
+    const page = async (after: string) =>
+      (await (
+        await request("/api/telemetry?after=" + after, undefined, workerToken)
+      ).json()) as { events: Array<{ id: number }> };
+    expect((await page("abc")).events.length).toBeGreaterThan(0);
+    expect((await page("abc")).events[0].id).toBe((await page("0")).events[0].id);
+    expect((await page("999999999")).events.length).toBe(0);
   });
   test("MCP serves the same observation and image capabilities", async () => {
     const transport = new StdioClientTransport({

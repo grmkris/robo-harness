@@ -33,3 +33,10 @@ export function trustedSource(ip: string, trust: Trust) {
   if (isLoopback(address)) return trust.loopback;
   return isTailnetAddress(address);
 }
+// An event cursor from a client. Anything that is not a non-negative integer
+// means "from the beginning"; NaN used to be bound into the query and return
+// nothing, so a client resuming with a bad Last-Event-ID silently lost history.
+export function parseCursor(value: string | null | undefined) {
+  const n = Number(value ?? 0);
+  return Number.isSafeInteger(n) && n >= 0 ? n : 0;
+}

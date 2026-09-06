@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { equal, isTailnetAddress, trustedSource } from "../src/server/access";
+import {
+  equal,
+  isTailnetAddress,
+  parseCursor,
+  trustedSource,
+} from "../src/server/access";
 describe("trustedSource", () => {
   const trust = { loopback: false, blocked: new Set(["100.77.154.45"]) };
   test("accepts tailnet peers only", () => {
@@ -27,5 +32,15 @@ describe("equal", () => {
     expect(equal("éé", "ab")).toBe(false);
     expect(equal("éé", "éé")).toBe(true);
     expect(equal("", "a")).toBe(false);
+  });
+});
+describe("parseCursor", () => {
+  test("accepts non-negative integers and falls back to the beginning", () => {
+    expect(parseCursor("42")).toBe(42);
+    expect(parseCursor(null)).toBe(0);
+    expect(parseCursor("abc")).toBe(0);
+    expect(parseCursor("-5")).toBe(0);
+    expect(parseCursor("1.5")).toBe(0);
+    expect(parseCursor("Infinity")).toBe(0);
   });
 });
