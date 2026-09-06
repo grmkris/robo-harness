@@ -422,6 +422,12 @@ const sampler = setInterval(() => {
   void robot
     .sample()
     .then(() => recording.recordSample())
+    .catch((e: unknown) => {
+      console.error(
+        "Sampler failure:",
+        e instanceof Error ? e.message : String(e),
+      );
+    })
     .finally(() => {
       sampling = false;
     });

@@ -153,7 +153,11 @@ export async function recordSample() {
   }
 }
 export async function recordEvent(event: AppEvent) {
-  if (!active) return;
+  // Capture the recording before awaiting: stopRecording or a new start may
+  // change `active` while the program file is read, and the event must land in
+  // the recording that was live when it happened.
+  const record = active;
+  if (!record) return;
   if (
     event.type === "shell.completed" &&
     typeof event.data.program_sha256 === "string"
@@ -161,12 +165,12 @@ export async function recordEvent(event: AppEvent) {
     const hash = event.data.program_sha256;
     if (/^[a-f0-9]{64}$/.test(hash)) {
       await writeFile(
-        active.path + "/programs/" + hash + ".sh",
+        record.path + "/programs/" + hash + ".sh",
         await readFile(config.dataDir + "/programs/" + hash + ".sh"),
       );
     }
   }
-  await appendFile(active.path + "/events.jsonl", JSON.stringify(event) + "\n");
+  await appendFile(record.path + "/events.jsonl", JSON.stringify(event) + "\n");
 }
 export async function stopRecording() {
   if (!active) throw new ApiError("No active recording");

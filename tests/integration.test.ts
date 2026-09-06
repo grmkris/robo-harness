@@ -370,6 +370,16 @@ describe("mock HTTP integration", () => {
       .split("\n");
     expect(lines.length).toBe(stopped.data.frames);
     expect(JSON.parse(lines[0]).images.workspace.path).toStartWith("images/");
+    // Events raised right after the stop must not reach a recording that is gone.
+    await call("acquire", { mode: "agent" }, agentToken);
+    await call("release", {}, agentToken);
+    const events = (await readFile(stopped.data.path + "/events.jsonl", "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string });
+    expect(events.map((e) => e.type)).toContain("recording.started");
+    expect(events.map((e) => e.type)).not.toContain("control.acquired");
+    expect((await request("/api/status")).status).toBe(200);
   });
   test("custom model loop executes observation and image tools", async () => {
     requests = [];
