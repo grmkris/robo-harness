@@ -1,6 +1,6 @@
 import { getCapability } from "./capabilities";
 import { resolve, sep } from "node:path";
-import { equal } from "./access";
+import { equal, trustedSource } from "./access";
 import { config } from "./config";
 import { z } from "zod";
 import { db, events, subscribe } from "./store";
@@ -46,16 +46,17 @@ const auth = (req: Request): Principal | null => {
     return { owner: session.owner, human: true };
   // An expired program credential must not fall back to operator access.
   if (bearer || config.accessMode !== "tailnet") return null;
+  // Tailnet trust comes from the source address, never from a header. The
+  // identity headers only choose a name; they cannot grant human privilege.
+  const address = server.requestIP(req)?.address ?? "";
+  if (!trustedSource(address, config.trust)) return null;
   const browser = req.headers.get("x-robo-browser");
   const controller = req.headers.get("x-robo-controller");
   const id = browser ?? controller;
   if (id && !/^[a-zA-Z0-9_-]{1,80}$/.test(id)) return null;
   if (browser) return { owner: "browser-" + browser, human: true };
   if (controller) return { owner: "external-" + controller, human: false };
-  return {
-    owner: "tailnet-" + (server.requestIP(req)?.address ?? "local"),
-    human: true,
-  };
+  return { owner: "tailnet-" + address, human: true };
 };
 const isWorker = (req: Request) =>
   equal(req.headers.get("authorization") ?? "", "Bearer " + config.workerToken);

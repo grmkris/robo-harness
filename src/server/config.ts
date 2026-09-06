@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { isLoopback, isTailnetAddress } from "./access";
 export const root = resolve(import.meta.dir, "../..");
 export const dataDir = resolve(process.env.ROBO_DATA_DIR ?? root + "/var");
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -28,6 +29,21 @@ const allowedOrigins = new Set([
     .map((value) => value.trim())
     .filter(Boolean),
 ]);
+const ioUrl = process.env.ROBO_IO_URL ?? "http://127.0.0.1:8941";
+const piDevHost = process.env.ROBO_PI_DEV_HOST?.split("@").at(-1) ?? "";
+// Who may act without a credential in tailnet mode. Loopback is trusted when the
+// server is bound there (only local processes can connect) unless ROBO_TRUST_LOOPBACK
+// says otherwise; the robot host and the Pi development account never are.
+const trust = {
+  loopback:
+    process.env.ROBO_TRUST_LOOPBACK === "1" ||
+    (process.env.ROBO_TRUST_LOOPBACK !== "0" && isLoopback(host)),
+  blocked: new Set(
+    [new URL(ioUrl).hostname, piDevHost].filter(
+      (value) => value && !isLoopback(value),
+    ),
+  ),
+};
 export const config = {
   root,
   dataDir,
@@ -39,14 +55,12 @@ export const config = {
   host,
   port,
   allowedOrigins,
-  ioUrl: process.env.ROBO_IO_URL ?? "http://127.0.0.1:8941",
+  trust,
+  ioUrl,
   rerunWeb: process.env.ROBO_RERUN_WEB ?? "http://127.0.0.1:8942",
   rerunGrpc: process.env.ROBO_RERUN_GRPC ?? "http://127.0.0.1:8943",
 };
-if (
-  !["127.0.0.1", "::1"].includes(config.host) &&
-  !/^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(config.host)
-)
+if (!isLoopback(config.host) && !isTailnetAddress(config.host))
   throw new Error("Bind to loopback or a Tailscale address");
 
 if (!["tailnet", "token"].includes(config.accessMode))
