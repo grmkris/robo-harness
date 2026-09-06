@@ -7,6 +7,7 @@ The user confirmed the workspace was clear and authorized powered movement. The 
 - Workbench: http://100.105.51.45:8940, Tailscale access without login.
 - Netcup development checkout: `/home/kristjan/code/robo-harness` (branch `main`).
 - Netcup deployment: `/home/kristjan/code/robo-harness-deploy`, a git worktree on the `deploy` branch that only ever fast-forwards to a tagged release; both systemd units run from it. Data (sqlite, tokens, recordings, workspaces) lives in `/home/kristjan/.local/state/robo-harness` via `ROBO_DATA_DIR`, so a checkout can be replaced without touching evidence.
+- Netcup firewall: ufw denies everything not on `tailscale0`, so development containers on Docker's bridge need `sudo ufw allow in on docker0 to 100.105.51.45 port 8940 proto tcp` (applied 2026-09-07). Bridge peers are still refused as operators; they authenticate with their program token.
 - Netcup user services: `robo-app.service` and `robo-rerun.service`, enabled with user lingering already active.
 - Pi: `kris@100.77.154.45`; deployment `/home/kris/robo-harness`.
 - Pi system service: `robo-io.service`, running as the existing lab user. It has `Restart=no` and is deliberately not enabled at boot; start explicitly after checking hardware.
