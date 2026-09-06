@@ -161,9 +161,9 @@ export async function recordEvent(event: AppEvent) {
   if (!record) return;
   if (
     event.type === "shell.completed" &&
-    typeof event.data.program_sha256 === "string"
+    typeof event.data["program_sha256"] === "string"
   ) {
-    const hash = event.data.program_sha256;
+    const hash = event.data["program_sha256"];
     if (/^[a-f0-9]{64}$/.test(hash)) {
       await writeFile(
         record.path + "/programs/" + hash + ".sh",

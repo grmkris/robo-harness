@@ -48,10 +48,10 @@ export function setBudget(limit: number) {
 export function perceptionConfig() {
   return {
     configured: Boolean(
-      process.env.ROBO_PERCEPTION_URL || process.env.ROBO_FAL_ENDPOINT
+      process.env["ROBO_PERCEPTION_URL"] || process.env["ROBO_FAL_ENDPOINT"]
     ),
-    provider: process.env.ROBO_FAL_ENDPOINT ? "fal" : "worker",
-    cost_usd: Number(process.env.ROBO_PERCEPTION_COST_USD ?? 0),
+    provider: process.env["ROBO_FAL_ENDPOINT"] ? "fal" : "worker",
+    cost_usd: Number(process.env["ROBO_PERCEPTION_COST_USD"] ?? 0),
     budget: budget(),
   };
 }
@@ -99,12 +99,12 @@ export async function perceive(
   try {
     const body = { kind: input.kind, prompt: input.prompt, frame };
     let raw: unknown;
-    if (process.env.ROBO_FAL_ENDPOINT) {
-      const endpoint = process.env.ROBO_FAL_ENDPOINT;
+    if (process.env["ROBO_FAL_ENDPOINT"]) {
+      const endpoint = process.env["ROBO_FAL_ENDPOINT"];
       if (!/^[a-zA-Z0-9_/-]+$/.test(endpoint))
         throw new Error("Invalid configured fal endpoint");
       const headers = {
-        Authorization: "Key " + process.env.FAL_KEY,
+        Authorization: "Key " + process.env["FAL_KEY"],
         "Content-Type": "application/json",
       };
       const queued = await fetch("https://queue.fal.run/" + endpoint, {
@@ -158,11 +158,11 @@ export async function perceive(
       }
     } else {
       const response = await fetch(
-        process.env.ROBO_PERCEPTION_URL! + "/infer",
+        process.env["ROBO_PERCEPTION_URL"]! + "/infer",
         {
           method: "POST",
           headers: {
-            Authorization: "Bearer " + process.env.ROBO_PERCEPTION_TOKEN,
+            Authorization: "Bearer " + process.env["ROBO_PERCEPTION_TOKEN"],
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),

@@ -60,7 +60,7 @@ async function api<T = Record<string, unknown>>(
       "X-Robo-Browser": browserController,
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? null : JSON.stringify(body),
   });
   const result = await response.json();
   if (!response.ok)
@@ -212,8 +212,8 @@ function App() {
           : [...previous, event].slice(-250)
       );
       if (event.type === "chat.delta")
-        setDraft((v) => v + String(event.data.text));
-      if (event.type === "chat.message" && event.data.role === "assistant")
+        setDraft((v) => v + String(event.data["text"]));
+      if (event.type === "chat.message" && event.data["role"] === "assistant")
         setDraft("");
       if (event.type === "chat.finished") setDraft("");
     };
@@ -314,7 +314,7 @@ function App() {
   const chatEvents = events.filter(
     (e) =>
       e.type.startsWith("chat.") &&
-      e.data.session_id === session &&
+      e.data["session_id"] === session &&
       !["chat.delta", "chat.finished"].includes(e.type)
   );
   const lastPerception = events.findLast(
@@ -331,7 +331,7 @@ function App() {
   const moveCartesian = async (axis: number, delta: number) => {
     if (!obs) return;
     const xyz = [...obs.ee];
-    xyz[axis] += delta;
+    xyz[axis] = (xyz[axis] ?? 0) + delta;
     await run("move", { request_id: newId(), xyz, duration_s: 1 });
   };
   return (
@@ -522,7 +522,7 @@ function App() {
           {lastPerception ? (
             <a
               className="artifact-link"
-              href={"/api/perception/" + lastPerception.data.id}
+              href={"/api/perception/" + lastPerception.data["id"]}
               target="_blank"
               rel="noreferrer"
             >
@@ -623,13 +623,13 @@ function App() {
                 {chatEvents.map((e) => (
                   <article
                     className={
-                      "chat-event " + (e.data.role === "user" ? "user" : "")
+                      "chat-event " + (e.data["role"] === "user" ? "user" : "")
                     }
                     key={e.id}
                   >
                     <small>
                       {e.type === "chat.message"
-                        ? e.data.role === "user"
+                        ? e.data["role"] === "user"
                           ? "YOU"
                           : "AGENT"
                         : e.type
@@ -639,19 +639,19 @@ function App() {
                       <time>{time(e.time)}</time>
                     </small>
                     {e.type === "chat.message" ? (
-                      <p>{String(e.data.text)}</p>
+                      <p>{String(e.data["text"])}</p>
                     ) : e.type === "chat.tool" ? (
                       <details>
-                        <summary>{String(e.data.name)}</summary>
-                        <pre>{JSON.stringify(e.data.input, null, 2)}</pre>
+                        <summary>{String(e.data["name"])}</summary>
+                        <pre>{JSON.stringify(e.data["input"], null, 2)}</pre>
                       </details>
                     ) : e.type === "chat.tool_result" ? (
                       <details>
-                        <summary>{String(e.data.name)} · result</summary>
-                        <pre>{JSON.stringify(e.data.output, null, 2)}</pre>
+                        <summary>{String(e.data["name"])} · result</summary>
+                        <pre>{JSON.stringify(e.data["output"], null, 2)}</pre>
                       </details>
                     ) : (
-                      <p>{String(e.data.message ?? e.data.text ?? "")}</p>
+                      <p>{String(e.data["message"] ?? e.data["text"] ?? "")}</p>
                     )}
                   </article>
                 ))}
@@ -1023,7 +1023,7 @@ function App() {
               >
                 −
               </button>
-              <span>{obs?.ee[i].toFixed(3) ?? "—"}</span>
+              <span>{obs?.ee[i]?.toFixed(3) ?? "—"}</span>
               <button
                 aria-label={"Increase Cartesian " + axis}
                 disabled={

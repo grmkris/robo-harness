@@ -24,7 +24,7 @@ export async function shell(
   const capability = issueCapability(id, input.timeout_s + 5);
   let command: string[];
   if (input.host === "pi") {
-    const host = process.env.ROBO_PI_DEV_HOST;
+    const host = process.env["ROBO_PI_DEV_HOST"];
     if (!host)
       throw new ApiError(
         "Configure a dedicated Pi development SSH account first",
@@ -44,11 +44,11 @@ export async function shell(
       String(input.timeout_s),
     ];
   } else {
-    const network = shellNetwork(process.env.ROBO_SHELL_NETWORK);
+    const network = shellNetwork(process.env["ROBO_SHELL_NETWORK"]);
     // Bridge containers cannot reach a loopback-bound server; the tailnet bind
     // address is reachable from the bridge because the host owns it.
     const programUrl =
-      process.env.ROBO_PROGRAM_URL ??
+      process.env["ROBO_PROGRAM_URL"] ??
       (isLoopback(config.host)
         ? null
         : "http://" + config.host + ":" + config.port);
@@ -60,7 +60,7 @@ export async function shell(
     command = dockerArguments({
       id,
       workspace,
-      image: process.env.ROBO_DEV_IMAGE ?? "robo-harness-dev:local",
+      image: process.env["ROBO_DEV_IMAGE"] ?? "robo-harness-dev:local",
       uid: process.getuid?.() ?? 1000,
       gid: process.getgid?.() ?? 1000,
       network,
@@ -72,14 +72,14 @@ export async function shell(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { PATH: process.env.PATH, HOME: process.env.HOME },
+    env: { PATH: process.env["PATH"], HOME: process.env["HOME"] },
   });
   proc.stdin.write(
     input.host === "pi"
       ? JSON.stringify({
           command: input.command,
           token: capability.token,
-          url: process.env.ROBO_PI_PROGRAM_URL ?? "",
+          url: process.env["ROBO_PI_PROGRAM_URL"] ?? "",
         })
       : input.command
   );

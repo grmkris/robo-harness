@@ -31,14 +31,15 @@ async function request(
       "Content-Type": "application/json",
       ...headers,
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? null : JSON.stringify(body),
   });
 }
 async function call(name: string, body: unknown = {}, token = operator) {
   const response = await request("/api/tool/" + name, body, token);
   return {
     status: response.status,
-    data: (await response.json()) as Record<string, any>,
+    // Responses are inspected loosely on purpose; the contract tests cover shapes.
+    data: (await response.json()) as any,
   };
 }
 async function until(check: () => Promise<boolean>, timeout = 6000) {
@@ -388,7 +389,9 @@ describe("mock HTTP integration", () => {
       .trim()
       .split("\n");
     expect(lines.length).toBe(stopped.data.frames);
-    expect(JSON.parse(lines[0]).images.workspace.path).toStartWith("images/");
+    expect(JSON.parse(lines[0] ?? "{}").images.workspace.path).toStartWith(
+      "images/"
+    );
     // Events raised right after the stop must not reach a recording that is gone.
     await call("acquire", { mode: "agent" }, agentToken);
     await call("release", {}, agentToken);
@@ -425,8 +428,8 @@ describe("mock HTTP integration", () => {
         await request("/api/telemetry?after=" + after, undefined, workerToken)
       ).json()) as { events: Array<{ id: number }> };
     expect((await page("abc")).events.length).toBeGreaterThan(0);
-    expect((await page("abc")).events[0].id).toBe(
-      (await page("0")).events[0].id
+    expect((await page("abc")).events[0]?.id).toBe(
+      (await page("0")).events[0]?.id
     );
     expect((await page("999999999")).events.length).toBe(0);
   });

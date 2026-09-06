@@ -12,11 +12,10 @@ import { config } from "./config";
 import { emit } from "./store";
 export type MoveInput = z.infer<typeof moveSchema>;
 export class ApiError extends Error {
-  constructor(
-    message: string,
-    public status = 409
-  ) {
+  status: number;
+  constructor(message: string, status = 409) {
     super(message);
+    this.status = status;
   }
 }
 export async function io<T>(
@@ -30,7 +29,7 @@ export async function io<T>(
       Authorization: "Bearer " + config.ioToken,
       "Content-Type": "application/json",
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? null : JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
   const data = (await res.json()) as T & { error?: string; detail?: unknown };

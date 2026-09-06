@@ -23,7 +23,7 @@ let telemetry = {
   recording_id: null as string | null,
 };
 const json = (body: unknown, status = 200, headers?: HeadersInit) =>
-  Response.json(body, { status, headers });
+  Response.json(body, headers ? { status, headers } : { status });
 const auth = (req: Request): Principal | null => {
   const bearer = req.headers.get("authorization")?.replace(/^Bearer /, "");
   if (bearer) {

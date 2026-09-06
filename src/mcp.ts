@@ -17,13 +17,13 @@ for (const name of Object.keys(toolSchemas) as ToolName[]) {
     async (input: Record<string, unknown>) => {
       try {
         const data = await callTool(name, input);
-        if (name === "capture" && typeof data.base64 === "string")
+        if (name === "capture" && typeof data["base64"] === "string")
           return {
             content: [
               {
                 type: "image" as const,
-                data: data.base64,
-                mimeType: String(data.media_type),
+                data: data["base64"],
+                mimeType: String(data["media_type"]),
               },
               {
                 type: "text" as const,

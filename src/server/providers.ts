@@ -7,8 +7,8 @@ import { ApiError } from "./robot";
 const alibaba =
   "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
 async function xaiToken() {
-  if (process.env.XAI_API_KEY) return process.env.XAI_API_KEY;
-  const path = process.env.ROBO_XAI_AUTH_FILE;
+  if (process.env["XAI_API_KEY"]) return process.env["XAI_API_KEY"];
+  const path = process.env["ROBO_XAI_AUTH_FILE"];
   if (!path) return null;
   try {
     const file = JSON.parse(await readFile(path, "utf8"));
@@ -41,22 +41,24 @@ export async function catalog(): Promise<ProviderInfo[]> {
     {
       id: "alibaba",
       name: "Alibaba Token Plan",
-      available: Boolean(process.env.DASHSCOPE_API_KEY),
-      model: process.env.ROBO_ALIBABA_MODEL ?? "qwen3.8-max",
-      vision: process.env.ROBO_ALIBABA_VISION === "1",
-      reason: process.env.DASHSCOPE_API_KEY
-        ? undefined
-        : "Set DASHSCOPE_API_KEY",
+      available: Boolean(process.env["DASHSCOPE_API_KEY"]),
+      model: process.env["ROBO_ALIBABA_MODEL"] ?? "qwen3.8-max",
+      vision: process.env["ROBO_ALIBABA_VISION"] === "1",
+      ...(process.env["DASHSCOPE_API_KEY"]
+        ? {}
+        : { reason: "Set DASHSCOPE_API_KEY" }),
     },
     {
       id: "xai",
       name: "xAI / Grok",
       available: xai,
-      model: process.env.ROBO_XAI_MODEL ?? "grok-4.6",
-      vision: process.env.ROBO_XAI_VISION !== "0",
-      reason: xai
-        ? undefined
-        : "Configure XAI_API_KEY or an explicit fresh Grok auth file",
+      model: process.env["ROBO_XAI_MODEL"] ?? "grok-4.6",
+      vision: process.env["ROBO_XAI_VISION"] !== "0",
+      ...(xai
+        ? {}
+        : {
+            reason: "Configure XAI_API_KEY or an explicit fresh Grok auth file",
+          }),
     },
     {
       id: "claude",
@@ -84,10 +86,12 @@ export async function resolveModel(provider: string) {
     name: provider,
     baseURL:
       provider === "alibaba"
-        ? (process.env.ROBO_ALIBABA_URL ?? alibaba)
+        ? (process.env["ROBO_ALIBABA_URL"] ?? alibaba)
         : "https://api.x.ai/v1",
     includeUsage: true,
-    apiKey: provider === "alibaba" ? process.env.DASHSCOPE_API_KEY : undefined,
+    ...(provider === "alibaba" && process.env["DASHSCOPE_API_KEY"]
+      ? { apiKey: process.env["DASHSCOPE_API_KEY"] }
+      : {}),
     ...(provider === "xai"
       ? {
           fetch: Object.assign(
