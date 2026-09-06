@@ -91,6 +91,9 @@ export async function perceive(
     signal ?? new AbortController().signal,
     AbortSignal.timeout(120000),
   ]);
+  // The reservation is refunded unless a paid backend accepted the job; after
+  // that point the charge stands even if the answer is rejected.
+  let charged = false;
   try {
     const body = { kind: input.kind, prompt: input.prompt, frame };
     let raw: unknown;
@@ -109,6 +112,7 @@ export async function perceive(
         signal: combined,
       });
       if (!queued.ok) throw new Error("fal rejected the inference request");
+      charged = true;
       const job = (await queued.json()) as {
         status_url: string;
         response_url: string;
@@ -167,6 +171,7 @@ export async function perceive(
         throw new Error(
           "Perception worker failed with status " + response.status,
         );
+      charged = true;
       raw = await response.json();
     }
     const result = resultSchema.parse(raw);
@@ -199,6 +204,10 @@ export async function perceive(
     return { id, ...result, source };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Perception failed";
+    if (!charged)
+      db.query(
+        "UPDATE budgets SET spent_usd=MAX(0,spent_usd-?) WHERE id=1",
+      ).run(settings.cost_usd);
     db.query("UPDATE perception SET state='failed',error=? WHERE id=?").run(
       message,
       id,

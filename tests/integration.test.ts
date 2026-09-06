@@ -59,6 +59,8 @@ beforeAll(async () => {
           prompt: string;
           frame: { id: string; width: number; height: number };
         };
+        if (payload.prompt === "fail")
+          return new Response("worker down", { status: 500 });
         return Response.json({
           kind: payload.kind,
           model: "local-test-fixture",
@@ -332,6 +334,15 @@ describe("mock HTTP integration", () => {
   });
   test("perception budgets are enforced atomically and wrong frames are rejected", async () => {
     expect((await request("/api/budget", { limit: 0.02 })).status).toBe(200);
+    const spent = async () =>
+      ((await (await request("/api/status")).json()) as any).budget.spent_usd;
+    const down = await call("perceive", {
+      camera: "workspace",
+      kind: "depth",
+      prompt: "fail",
+    });
+    expect(down.status).toBe(502);
+    expect(await spent()).toBe(0);
     const result = await call("perceive", {
       camera: "workspace",
       kind: "depth",
@@ -345,6 +356,7 @@ describe("mock HTTP integration", () => {
     });
     expect(bad.status).toBe(502);
     expect(bad.data.error).toContain("source frame");
+    expect(await spent()).toBeCloseTo(0.02, 6);
     expect(
       (await call("perceive", { camera: "workspace", kind: "depth" })).status,
     ).toBe(402);
