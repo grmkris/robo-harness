@@ -5,6 +5,7 @@ import {
   issueCapability,
   sweepCapabilities,
 } from "../src/server/capabilities";
+
 describe("capabilities", () => {
   test("issued tokens resolve to a program principal until revoked", () => {
     const { token, revoke } = issueCapability("job", 60);

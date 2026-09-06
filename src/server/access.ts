@@ -3,8 +3,8 @@ import { timingSafeEqual } from "node:crypto";
 // UTF-16 units: a multibyte probe used to reach timingSafeEqual with buffers of
 // different lengths, which throws and turned a bad token into a 502.
 export function equal(a: string, b: string) {
-  const x = Buffer.from(a),
-    y = Buffer.from(b);
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 }
 const normalize = (ip: string) => (ip.startsWith("::ffff:") ? ip.slice(7) : ip);
@@ -30,8 +30,12 @@ export interface Trust {
 }
 export function trustedSource(ip: string, trust: Trust) {
   const address = normalize(ip);
-  if (!address || trust.blocked.has(address)) return false;
-  if (isLoopback(address)) return trust.loopback;
+  if (!address || trust.blocked.has(address)) {
+    return false;
+  }
+  if (isLoopback(address)) {
+    return trust.loopback;
+  }
   return isTailnetAddress(address);
 }
 // An event cursor from a client. Anything that is not a non-negative integer

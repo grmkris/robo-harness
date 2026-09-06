@@ -5,19 +5,20 @@ import { join } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
 const root = join(import.meta.dir, "..");
-const appPort = 18940,
-  ioPort = 18941;
+const appPort = 18_940,
+  ioPort = 18_941;
 const operator = "integration-operator-token-not-a-real-secret";
 const agentToken = "integration-agent-token-not-a-real-secret";
 const ioToken = "integration-io-token-not-a-real-secret";
 const workerToken = "integration-worker-token-not-a-real-secret";
-let directory = "",
-  app: ReturnType<typeof Bun.spawn>,
-  io: ReturnType<typeof Bun.spawn>,
-  fixture: ReturnType<typeof Bun.serve>;
+let app: ReturnType<typeof Bun.spawn>,
+  directory = "",
+  fixture: ReturnType<typeof Bun.serve>,
+  io: ReturnType<typeof Bun.spawn>;
 let requests: Record<string, unknown>[] = [];
-const base = "http://127.0.0.1:" + appPort;
+const base = `http://127.0.0.1:${appPort}`;
 async function request(
   path: string,
   body?: unknown,
@@ -27,7 +28,7 @@ async function request(
   return fetch(base + path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
-      Authorization: "Bearer " + token,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       ...headers,
     },
@@ -35,7 +36,7 @@ async function request(
   });
 }
 async function call(name: string, body: unknown = {}, token = operator) {
-  const response = await request("/api/tool/" + name, body, token);
+  const response = await request(`/api/tool/${name}`, body, token);
   return {
     status: response.status,
     // Responses are inspected loosely on purpose; the contract tests cover shapes.
@@ -45,7 +46,9 @@ async function call(name: string, body: unknown = {}, token = operator) {
 async function until(check: () => Promise<boolean>, timeout = 6000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
-    if (await check()) return;
+    if (await check()) {
+      return;
+    }
     await Bun.sleep(80);
   }
   throw new Error("Condition timed out");
@@ -62,8 +65,9 @@ beforeAll(async () => {
           prompt: string;
           frame: { id: string; width: number; height: number };
         };
-        if (payload.prompt === "fail")
+        if (payload.prompt === "fail") {
           return new Response("worker down", { status: 500 });
+        }
         return Response.json({
           kind: payload.kind,
           model: "local-test-fixture",
@@ -79,7 +83,7 @@ beforeAll(async () => {
         });
       }
       const body = (await req.json()) as {
-        messages: Array<{ role: string; content: unknown }>;
+        messages: { role: string; content: unknown }[];
       };
       requests.push(body);
       const done = body.messages.some((m) => m.role === "tool");
@@ -123,15 +127,16 @@ beforeAll(async () => {
         },
       ];
       return new Response(
-        chunks.map((c) => "data: " + JSON.stringify(c) + "\n\n").join("") +
-          "data: [DONE]\n\n",
+        `${chunks
+          .map((c) => "data: " + JSON.stringify(c) + "\n\n")
+          .join("")}data: [DONE]\n\n`,
         { headers: { "Content-Type": "text/event-stream" } }
       );
     },
   });
   io = Bun.spawn(
     [
-      root + "/.venv/bin/python",
+      `${root}/.venv/bin/python`,
       "-m",
       "robo_harness.service",
       "--port",
@@ -156,12 +161,12 @@ beforeAll(async () => {
       ROBO_AGENT_TOKEN: agentToken,
       ROBO_IO_TOKEN: ioToken,
       ROBO_WORKER_TOKEN: workerToken,
-      ROBO_IO_URL: "http://127.0.0.1:" + ioPort,
+      ROBO_IO_URL: `http://127.0.0.1:${ioPort}`,
       DASHSCOPE_API_KEY: "fixture-key-not-real",
-      ROBO_ALIBABA_URL: "http://127.0.0.1:" + fixture.port,
+      ROBO_ALIBABA_URL: `http://127.0.0.1:${fixture.port}`,
       ROBO_ALIBABA_MODEL: "fixture",
       ROBO_ALIBABA_VISION: "1",
-      ROBO_PERCEPTION_URL: "http://127.0.0.1:" + fixture.port,
+      ROBO_PERCEPTION_URL: `http://127.0.0.1:${fixture.port}`,
       ROBO_PERCEPTION_TOKEN: "local-fixture-token",
       ROBO_PERCEPTION_COST_USD: "0.01",
     },
@@ -176,14 +181,16 @@ beforeAll(async () => {
     } catch {
       return false;
     }
-  }, 12000);
-}, 15000);
+  }, 12_000);
+}, 15_000);
 afterAll(async () => {
   app?.kill("SIGTERM");
   io?.kill("SIGTERM");
   fixture?.stop(true);
   await Promise.all([app?.exited, io?.exited]);
-  if (directory) await rm(directory, { recursive: true, force: true });
+  if (directory) {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 describe("mock HTTP integration", () => {
   test("requires authentication and rejects cross-origin control", async () => {
@@ -208,8 +215,8 @@ describe("mock HTTP integration", () => {
     expect(
       (
         await request("/api/tool/stop", {}, operator, {
-          Host: "rebound.example:" + appPort,
-          Origin: "http://rebound.example:" + appPort,
+          Host: `rebound.example:${appPort}`,
+          Origin: `http://rebound.example:${appPort}`,
         })
       ).status
     ).toBe(403);
@@ -240,7 +247,7 @@ describe("mock HTTP integration", () => {
     const obs = (await call("observe", {}, agentToken)).data;
     const wild = await call(
       "move",
-      { request_id: crypto.randomUUID(), target: { shoulder_pan: 10000 } },
+      { request_id: crypto.randomUUID(), target: { shoulder_pan: 10_000 } },
       agentToken
     );
     expect(wild.status).toBe(422);
@@ -381,11 +388,13 @@ describe("mock HTTP integration", () => {
     expect(stopped.data.frames).toBeGreaterThan(2);
     expect(stopped.data.state).toBe("captured");
     const manifest = JSON.parse(
-      await readFile(stopped.data.path + "/manifest.json", "utf8")
+      await readFile(`${stopped.data.path}/manifest.json`, "utf-8")
     );
     expect(manifest.backend).toBe("mock");
     expect(manifest.urdf_sha256).toHaveLength(64);
-    const lines = (await readFile(stopped.data.path + "/samples.jsonl", "utf8"))
+    const lines = (
+      await readFile(`${stopped.data.path}/samples.jsonl`, "utf-8")
+    )
       .trim()
       .split("\n");
     expect(lines.length).toBe(stopped.data.frames);
@@ -395,7 +404,9 @@ describe("mock HTTP integration", () => {
     // Events raised right after the stop must not reach a recording that is gone.
     await call("acquire", { mode: "agent" }, agentToken);
     await call("release", {}, agentToken);
-    const events = (await readFile(stopped.data.path + "/events.jsonl", "utf8"))
+    const events = (
+      await readFile(`${stopped.data.path}/events.jsonl`, "utf-8")
+    )
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string });
@@ -417,16 +428,16 @@ describe("mock HTTP integration", () => {
     });
     expect(requests.length).toBeGreaterThan(1);
     expect(JSON.stringify(requests).includes("image_url")).toBe(true);
-    const history = (await (
-      await request("/api/conversations")
-    ).json()) as Array<{ id: string }>;
+    const history = (await (await request("/api/conversations")).json()) as {
+      id: string;
+    }[];
     expect(history.some((c) => c.id === session.session_id)).toBe(true);
   });
   test("a malformed event cursor replays from the beginning", async () => {
     const page = async (after: string) =>
       (await (
-        await request("/api/telemetry?after=" + after, undefined, workerToken)
-      ).json()) as { events: Array<{ id: number }> };
+        await request(`/api/telemetry?after=${after}`, undefined, workerToken)
+      ).json()) as { events: { id: number }[] };
     expect((await page("abc")).events.length).toBeGreaterThan(0);
     expect((await page("abc")).events[0]?.id).toBe(
       (await page("0")).events[0]?.id
@@ -436,7 +447,7 @@ describe("mock HTTP integration", () => {
   test("MCP serves the same observation and image capabilities", async () => {
     const transport = new StdioClientTransport({
       command: "bun",
-      args: [root + "/src/mcp.ts"],
+      args: [`${root}/src/mcp.ts`],
       env: {
         ...Object.fromEntries(
           Object.entries(process.env).filter(
@@ -460,12 +471,10 @@ describe("mock HTTP integration", () => {
         arguments: { camera: "wrist" },
       });
       expect(
-        (result.content as Array<{ type: string }>).some(
-          (c) => c.type === "image"
-        )
+        (result.content as { type: string }[]).some((c) => c.type === "image")
       ).toBe(true);
     } finally {
       await client.close();
     }
-  }, 10000);
+  }, 10_000);
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+
 export const joints = [
   "shoulder_pan",
   "shoulder_lift",
@@ -114,7 +115,7 @@ export const toolSchemas = {
   recording_start: z.object({ label: z.string().min(1).max(120) }),
   recording_stop: z.object({}),
   shell: z.object({
-    command: z.string().min(1).max(16000),
+    command: z.string().min(1).max(16_000),
     host: z.enum(["netcup", "pi"]).default("netcup"),
     timeout_s: z.number().min(1).max(120).default(30),
   }),

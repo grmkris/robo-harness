@@ -1,16 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import {
-  joints,
-  type AppEvent,
-  type Observation,
-  type ProviderInfo,
-} from "../shared/contracts";
+import { joints } from "../shared/contracts";
+import type { AppEvent, Observation, ProviderInfo } from "../shared/contracts";
 
 import "./style.css";
 
-type Status = {
+interface Status {
   access_mode: "tailnet" | "token";
   observation: Observation | null;
   robot_error: string | null;
@@ -34,15 +30,15 @@ type Status = {
   clock: { uncertainty_ms: number };
   perception: { configured: boolean; provider: string; cost_usd: number };
   budget: { limit_usd: number; spent_usd: number } | null;
-};
-type Recorded = {
+}
+interface Recorded {
   id: string;
   label: string;
   created: number;
   frames: number;
   state: string;
   error: string | null;
-};
+}
 // HTTP tailnet origins lack randomUUID; getRandomValues also works there.
 const newId = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
@@ -54,7 +50,7 @@ async function api<T = Record<string, unknown>>(
   path: string,
   body?: unknown
 ): Promise<T> {
-  const response = await fetch("/api/" + path, {
+  const response = await fetch(`/api/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       "X-Robo-Browser": browserController,
@@ -63,15 +59,16 @@ async function api<T = Record<string, unknown>>(
     body: body === undefined ? null : JSON.stringify(body),
   });
   const result = await response.json();
-  if (!response.ok)
+  if (!response.ok) {
     throw new Error(
       response.status === 401
         ? "AUTH_REQUIRED"
         : (result.error ?? "Request failed")
     );
+  }
   return result;
 }
-const tool = (name: string, input: unknown = {}) => api("tool/" + name, input);
+const tool = (name: string, input: unknown = {}) => api(`tool/${name}`, input);
 const label = (value: string) => value.replaceAll("_", " ");
 const time = (value: number) =>
   new Date(value).toLocaleTimeString([], {
@@ -95,9 +92,9 @@ function MoveIcon() {
 }
 
 function Login({ onDone }: { onDone: () => void }) {
-  const [token, setToken] = useState(""),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
+  const [token, setToken] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   return (
     <main className="login">
       <div className="login-mark">
@@ -117,11 +114,11 @@ function Login({ onDone }: { onDone: () => void }) {
           try {
             await api("login", { token });
             onDone();
-          } catch (e) {
+          } catch (error) {
             setError(
-              (e as Error).message === "AUTH_REQUIRED"
+              (error as Error).message === "AUTH_REQUIRED"
                 ? "Incorrect operator token"
-                : (e as Error).message
+                : (error as Error).message
             );
           } finally {
             setBusy(false);
@@ -152,48 +149,50 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 function App() {
-  const [logged, setLogged] = useState<boolean | null>(null),
-    [status, setStatus] = useState<Status | null>(null),
-    [error, setError] = useState("");
-  const [events, setEvents] = useState<AppEvent[]>([]),
-    [tab, setTab] = useState("chat"),
-    [replay, setReplay] = useState<string | null>(null);
-  const [records, setRecords] = useState<Recorded[]>([]),
-    [fallback, setFallback] = useState(false),
-    [pending, setPending] = useState(false);
+  const [logged, setLogged] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
+  const [error, setError] = useState("");
+  const [events, setEvents] = useState<AppEvent[]>([]);
+  const [tab, setTab] = useState("chat");
+  const [replay, setReplay] = useState<string | null>(null);
+  const [records, setRecords] = useState<Recorded[]>([]);
+  const [fallback, setFallback] = useState(false);
+  const [pending, setPending] = useState(false);
   const [recordName, setRecordName] = useState(
-    "Exploration " + new Date().toLocaleDateString()
+    `Exploration ${new Date().toLocaleDateString()}`
   );
   const [session, setSession] = useState<string | undefined>(
-      () => sessionStorage.getItem("robo-conversation") ?? undefined
-    ),
-    [provider, setProvider] = useState(""),
-    [message, setMessage] = useState("");
-  const [draft, setDraft] = useState(""),
-    [camera, setCamera] = useState("workspace"),
-    [perceptionPrompt, setPerceptionPrompt] = useState("white object");
-  const [command, setCommand] = useState("python --version"),
-    [shellHost, setShellHost] = useState("netcup"),
-    [shellResult, setShellResult] = useState("");
-  const [budgetInput, setBudgetInput] = useState("1"),
-    [jogStep, setJogStep] = useState(2),
-    [cartStep, setCartStep] = useState(0.005);
-  const [viewTick, setViewTick] = useState(0),
-    [viewerKey, setViewerKey] = useState(0),
-    [perceptionBusy, setPerceptionBusy] = useState(false);
+    () => sessionStorage.getItem("robo-conversation") ?? undefined
+  );
+  const [provider, setProvider] = useState("");
+  const [message, setMessage] = useState("");
+  const [draft, setDraft] = useState("");
+  const [camera, setCamera] = useState("workspace");
+  const [perceptionPrompt, setPerceptionPrompt] = useState("white object");
+  const [command, setCommand] = useState("python --version");
+  const [shellHost, setShellHost] = useState("netcup");
+  const [shellResult, setShellResult] = useState("");
+  const [budgetInput, setBudgetInput] = useState("1");
+  const [jogStep, setJogStep] = useState(2);
+  const [cartStep, setCartStep] = useState(0.005);
+  const [viewTick, setViewTick] = useState(0);
+  const [viewerKey, setViewerKey] = useState(0);
+  const [perceptionBusy, setPerceptionBusy] = useState(false);
   const chatEnd = useRef<HTMLDivElement>(null);
   const refresh = useCallback(async () => {
     try {
       const next = await api<Status>("status");
       setStatus(next);
       setLogged(true);
-    } catch (e) {
-      if ((e as Error).message === "AUTH_REQUIRED") setLogged(false);
-      else setError((e as Error).message);
+    } catch (error) {
+      if ((error as Error).message === "AUTH_REQUIRED") setLogged(false);
+      else setError((error as Error).message);
     }
   }, []);
   useEffect(() => {
-    if (logged === false) return;
+    if (logged === false) {
+      return;
+    }
     void refresh();
     const id = setInterval(() => {
       void refresh();
@@ -202,7 +201,9 @@ function App() {
     return () => clearInterval(id);
   }, [refresh, logged]);
   useEffect(() => {
-    if (!logged) return;
+    if (!logged) {
+      return;
+    }
     const source = new EventSource("/api/events");
     source.onmessage = (e) => {
       const event = JSON.parse(e.data) as AppEvent;
@@ -211,33 +212,45 @@ function App() {
           ? previous
           : [...previous, event].slice(-250)
       );
-      if (event.type === "chat.delta")
+      if (event.type === "chat.delta") {
         setDraft((v) => v + String(event.data["text"]));
-      if (event.type === "chat.message" && event.data["role"] === "assistant")
+      }
+      if (event.type === "chat.message" && event.data["role"] === "assistant") {
         setDraft("");
-      if (event.type === "chat.finished") setDraft("");
+      }
+      if (event.type === "chat.finished") {
+        setDraft("");
+      }
     };
     return () => source.close();
   }, [logged]);
   useEffect(() => {
-    if (!provider && status?.providers.some((p) => p.available))
+    if (!provider && status?.providers.some((p) => p.available)) {
       setProvider(status.providers.find((p) => p.available)!.id);
+    }
   }, [status?.providers, provider]);
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ block: "nearest" });
   }, [events.length, draft]);
   useEffect(() => {
-    if (tab !== "recordings" || !logged) return;
+    if (tab !== "recordings" || !logged) {
+      return;
+    }
     void api<Recorded[]>("recordings")
       .then(setRecords)
-      .catch((e) => setError(e.message));
+      .catch((error) => setError(error.message));
   }, [tab, logged, status?.recording]);
   useEffect(() => {
-    if (session) sessionStorage.setItem("robo-conversation", session);
-    else sessionStorage.removeItem("robo-conversation");
-    if (!logged || !session) return;
+    if (session) {
+      sessionStorage.setItem("robo-conversation", session);
+    } else {
+      sessionStorage.removeItem("robo-conversation");
+    }
+    if (!logged || !session) {
+      return;
+    }
     void api<{ conversation: { provider: string }; events: AppEvent[] }>(
-      "conversations/" + session
+      `conversations/${session}`
     )
       .then((result) => {
         setProvider(result.conversation.provider);
@@ -249,7 +262,7 @@ function App() {
           ].sort((a, b) => a.id - b.id)
         );
       })
-      .catch((e) => setError(e.message));
+      .catch((error) => setError(error.message));
   }, [session, logged]);
   const obs = status?.observation;
   const own = Boolean(logged && obs?.operator?.owner === status?.controller);
@@ -263,9 +276,11 @@ function App() {
     obs?.operation?.status === "running" ||
     obs?.operation?.status === "accepted";
   useEffect(() => {
-    if (!own) return;
+    if (!own) {
+      return;
+    }
     const id = setInterval(() => {
-      void tool("renew").catch((e) => setError(e.message));
+      void tool("renew").catch((error) => setError(error.message));
     }, 900);
     return () => clearInterval(id);
   }, [own]);
@@ -276,8 +291,8 @@ function App() {
       const result = await tool(name, input);
       await refresh();
       return result;
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (error) {
+      setError((error as Error).message);
       return null;
     } finally {
       setPending(false);
@@ -288,11 +303,13 @@ function App() {
     try {
       await tool("stop");
       await refresh();
-    } catch (e) {
-      setError("Stop command was not acknowledged: " + (e as Error).message);
+    } catch (error) {
+      setError(
+        "Stop command was not acknowledged: " + (error as Error).message
+      );
     }
   };
-  if (logged === false)
+  if (logged === false) {
     return (
       <Login
         onDone={() => {
@@ -300,17 +317,17 @@ function App() {
         }}
       />
     );
-  if (!status)
+  }
+  if (!status) {
     return <div className="connecting">Connecting to the workbench…</div>;
+  }
   const running = session ? status.running.includes(session) : false;
   const available = status.providers.some((p) => p.available);
-  const viewerUrl =
-    "/rerun/viewer/?theme=dark&url=" +
-    encodeURIComponent(
-      replay
-        ? location.origin + "/api/recordings/" + replay + "/replay.rrd"
-        : "rerun+" + location.origin + "/proxy"
-    );
+  const viewerUrl = `/rerun/viewer/?theme=dark&url=${encodeURIComponent(
+    replay
+      ? location.origin + "/api/recordings/" + replay + "/replay.rrd"
+      : "rerun+" + location.origin + "/proxy"
+  )}`;
   const chatEvents = events.filter(
     (e) =>
       e.type.startsWith("chat.") &&
@@ -321,7 +338,9 @@ function App() {
     (e) => e.type === "perception.completed"
   );
   const moveJoint = async (j: (typeof joints)[number], delta: number) => {
-    if (!obs) return;
+    if (!obs) {
+      return;
+    }
     await run("move", {
       request_id: newId(),
       target: { [j]: obs.measured[j] + delta },
@@ -329,7 +348,9 @@ function App() {
     });
   };
   const moveCartesian = async (axis: number, delta: number) => {
-    if (!obs) return;
+    if (!obs) {
+      return;
+    }
     const xyz = [...obs.ee];
     xyz[axis] = (xyz[axis] ?? 0) + delta;
     await run("move", { request_id: newId(), xyz, duration_s: 1 });
@@ -343,7 +364,7 @@ function App() {
           ROBO HARNESS<sup>LAB / 01</sup>
         </a>
         <div className="top-status">
-          <span className={"led " + (fresh ? "good" : "bad")} />
+          <span className={`led ${fresh ? "good" : "bad"}`} />
           {fresh ? "ROBOT CONNECTED" : "ROBOT UNAVAILABLE"}
           <span className="backend">
             {obs?.backend === "mock" ? "SIMULATED" : "SO-101"}
@@ -421,8 +442,8 @@ function App() {
                   {["workspace", "wrist"].map((name) => (
                     <figure key={name}>
                       <img
-                        src={"/api/cameras/" + name + "?t=" + viewTick}
-                        alt={name + " camera"}
+                        src={`/api/cameras/${name}?t=${viewTick}`}
+                        alt={`${name} camera`}
                         onError={(e) => {
                           e.currentTarget.style.opacity = ".3";
                         }}
@@ -439,7 +460,7 @@ function App() {
                     </figure>
                   ))}
                 </div>
-                {!fallback ? (
+                {fallback ? null : (
                   <div className="viewer-notice">
                     <strong>Rerun is reconnecting</strong>
                     <span>
@@ -447,7 +468,7 @@ function App() {
                         "Waiting for the telemetry worker. Live cameras remain available."}
                     </span>
                   </div>
-                ) : null}
+                )}
                 <div className="pose-readout">
                   <span>END EFFECTOR / BASE FRAME</span>
                   {obs?.ee.map((v, i) => (
@@ -466,7 +487,7 @@ function App() {
                 allow="fullscreen"
               />
             )}
-            <div className={"view-label " + (replay ? "history" : "")}>
+            <div className={`view-label ${replay ? "history" : ""}`}>
               <span className="led" />
               {replay
                 ? "HISTORICAL RECORDING"
@@ -522,7 +543,7 @@ function App() {
           {lastPerception ? (
             <a
               className="artifact-link"
-              href={"/api/perception/" + lastPerception.data["id"]}
+              href={`/api/perception/${lastPerception.data["id"]}`}
               target="_blank"
               rel="noreferrer"
             >
@@ -622,9 +643,7 @@ function App() {
                 ) : null}
                 {chatEvents.map((e) => (
                   <article
-                    className={
-                      "chat-event " + (e.data["role"] === "user" ? "user" : "")
-                    }
+                    className={`chat-event ${e.data["role"] === "user" ? "user" : ""}`}
                     key={e.id}
                   >
                     <small>
@@ -665,17 +684,19 @@ function App() {
                 ) : null}
                 <div ref={chatEnd} />
               </div>
-              {!available ? (
+              {available ? null : (
                 <div className="provider-note">
                   Connect Alibaba Token Plan or xAI in the app environment to
                   enable chat. Manual controls work independently.
                 </div>
-              ) : null}
+              )}
               <form
                 className="composer"
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  if (!message.trim()) return;
+                  if (!message.trim()) {
+                    return;
+                  }
                   setError("");
                   try {
                     if (running) {
@@ -689,8 +710,8 @@ function App() {
                       setSession(reply.session_id);
                     }
                     setMessage("");
-                  } catch (e) {
-                    setError((e as Error).message);
+                  } catch (error) {
+                    setError((error as Error).message);
                   }
                 }}
               >
@@ -762,7 +783,9 @@ function App() {
                     host: shellHost,
                     timeout_s: 30,
                   });
-                  if (out) setShellResult(JSON.stringify(out, null, 2));
+                  if (out) {
+                    setShellResult(JSON.stringify(out, null, 2));
+                  }
                 }}
               >
                 Run command ↗
@@ -793,7 +816,7 @@ function App() {
                 }}
               >
                 {status.recording
-                  ? "Stop recording · " + status.recording.frames + " frames"
+                  ? `Stop recording · ${status.recording.frames} frames`
                   : "Start recording"}
               </button>
               <div className="record-list">
@@ -842,7 +865,7 @@ function App() {
                     onClick={() => {
                       void api("budget", { limit: Number(budgetInput) })
                         .then(refresh)
-                        .catch((e) => setError(e.message));
+                        .catch((error) => setError(error.message));
                     }}
                   >
                     Set cap
@@ -850,14 +873,13 @@ function App() {
                 </div>
                 <small>
                   {status.budget
-                    ? "$" +
-                      status.budget.spent_usd.toFixed(2) +
-                      " reserved / $" +
-                      status.budget.limit_usd.toFixed(2)
+                    ? `$${status.budget.spent_usd.toFixed(
+                        2
+                      )} reserved / $${status.budget.limit_usd.toFixed(2)}`
                     : "No paid compute approved"}{" "}
                   ·{" "}
                   {status.perception.configured
-                    ? status.perception.provider + " configured"
+                    ? `${status.perception.provider} configured`
                     : "No inference endpoint"}
                 </small>
               </div>
@@ -888,7 +910,7 @@ function App() {
             <strong>
               <MoveIcon />{" "}
               {obs?.operator
-                ? label(obs.operator.mode) + " control"
+                ? `${label(obs.operator.mode)} control`
                 : "Holding position"}
             </strong>
           </div>
@@ -947,7 +969,7 @@ function App() {
                 <span
                   style={{
                     left: obs
-                      ? Math.max(
+                      ? `${Math.max(
                           0,
                           Math.min(
                             100,
@@ -955,14 +977,14 @@ function App() {
                               (obs.limits[j][1] - obs.limits[j][0])) *
                               100
                           )
-                        ) + "%"
+                        )}%`
                       : "50%",
                   }}
                 />
               </div>
               <div className="joint-jog">
                 <button
-                  aria-label={"Decrease " + label(j)}
+                  aria-label={`Decrease ${label(j)}`}
                   disabled={
                     !own ||
                     !fresh ||
@@ -981,7 +1003,7 @@ function App() {
                   {j === "gripper" ? "%" : "°"}
                 </span>
                 <button
-                  aria-label={"Increase " + label(j)}
+                  aria-label={`Increase ${label(j)}`}
                   disabled={
                     !own ||
                     !fresh ||
@@ -1008,7 +1030,7 @@ function App() {
             <div className="cart-axis" key={axis}>
               <b>{axis}</b>
               <button
-                aria-label={"Decrease Cartesian " + axis}
+                aria-label={`Decrease Cartesian ${axis}`}
                 disabled={
                   !own ||
                   !fresh ||
@@ -1025,7 +1047,7 @@ function App() {
               </button>
               <span>{obs?.ee[i]?.toFixed(3) ?? "—"}</span>
               <button
-                aria-label={"Increase Cartesian " + axis}
+                aria-label={`Increase Cartesian ${axis}`}
                 disabled={
                   !own ||
                   !fresh ||
@@ -1072,7 +1094,7 @@ function App() {
         <span>SMALL ARM. OPEN POSSIBILITIES.</span>
         <span>
           {obs?.operation
-            ? "Last motion: " + obs.operation.status
+            ? `Last motion: ${obs.operation.status}`
             : "Ready to explore"}{" "}
           · {obs?.calibration_id ?? "No calibration"}
         </span>
@@ -1081,7 +1103,7 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(
+createRoot(document.querySelector("#root")!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>

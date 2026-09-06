@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 
 import { moveSchema, toolSchemas } from "../src/shared/contracts";
+
 describe("public motion contract", () => {
   test("partial joint moves are valid", () =>
     expect(
@@ -18,7 +19,7 @@ describe("public motion contract", () => {
   });
   test("rejects non-finite angles and unknown joints", () => {
     expect(() =>
-      moveSchema.parse({ request_id: "a", target: { gripper: NaN } })
+      moveSchema.parse({ request_id: "a", target: { gripper: Number.NaN } })
     ).toThrow();
     expect(() =>
       moveSchema.parse({ request_id: "a", target: { typo: 1 } })

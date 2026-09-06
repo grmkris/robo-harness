@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 const root = join(import.meta.dir, "..");
 const base = "http://127.0.0.1:18942";
 let child: ReturnType<typeof Bun.spawn>;
@@ -23,7 +24,9 @@ beforeAll(async () => {
   });
   for (let n = 0; n < 60; n++) {
     try {
-      if ((await fetch(base + "/api/status")).ok) return;
+      if ((await fetch(`${base}/api/status`)).ok) {
+        return;
+      }
     } catch {}
     await Bun.sleep(50);
   }
@@ -32,23 +35,25 @@ beforeAll(async () => {
 afterAll(async () => {
   child?.kill();
   await child?.exited;
-  if (directory) await rm(directory, { recursive: true, force: true });
+  if (directory) {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 test("tailnet browser opens without a token and keeps browser identities distinct", async () => {
-  const a = await fetch(base + "/api/status", {
+  const a = await fetch(`${base}/api/status`, {
     headers: { "X-Robo-Browser": "browser-a" },
   });
-  const b = await fetch(base + "/api/status", {
+  const b = await fetch(`${base}/api/status`, {
     headers: { "X-Robo-Browser": "browser-b" },
   });
-  const one = (await a.json()) as any,
-    two = (await b.json()) as any;
+  const one = (await a.json()) as any;
+  const two = (await b.json()) as any;
   expect(a.status).toBe(200);
   expect(one.access_mode).toBe("tailnet");
   expect(one.controller).not.toBe(two.controller);
 });
 test("tokenless external clients retain agent control semantics", async () => {
-  const r = await fetch(base + "/api/tool/acquire", {
+  const r = await fetch(`${base}/api/tool/acquire`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -61,12 +66,12 @@ test("tokenless external clients retain agent control semantics", async () => {
 test("expired program credentials cannot become an operator and foreign origins cannot issue commands", async () => {
   expect(
     (
-      await fetch(base + "/api/status", {
+      await fetch(`${base}/api/status`, {
         headers: { Authorization: "Bearer expired-program" },
       })
     ).status
   ).toBe(401);
-  const r = await fetch(base + "/api/tool/stop", {
+  const r = await fetch(`${base}/api/tool/stop`, {
     method: "POST",
     headers: {
       Origin: "https://unrelated.example",

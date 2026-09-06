@@ -2,22 +2,22 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { callTool } from "./client";
-import { toolSchemas, type ToolName } from "./shared/contracts";
+import { toolSchemas } from "./shared/contracts";
+import type { ToolName } from "./shared/contracts";
 const server = new McpServer({ name: "robo-harness", version: "0.1.0" });
 for (const name of Object.keys(toolSchemas) as ToolName[]) {
   server.registerTool(
-    "robot_" + name,
+    `robot_${name}`,
     {
-      description:
-        "Robo Harness " +
-        name +
-        ". Joint degrees, gripper percent, Cartesian meters. Motion requires an active lease.",
+      description: `Robo Harness ${
+        name
+      }. Joint degrees, gripper percent, Cartesian meters. Motion requires an active lease.`,
       inputSchema: toolSchemas[name],
     },
     async (input: Record<string, unknown>) => {
       try {
         const data = await callTool(name, input);
-        if (name === "capture" && typeof data["base64"] === "string")
+        if (name === "capture" && typeof data["base64"] === "string") {
           return {
             content: [
               {
@@ -31,16 +31,18 @@ for (const name of Object.keys(toolSchemas) as ToolName[]) {
               },
             ],
           };
+        }
         return {
           content: [{ type: "text" as const, text: JSON.stringify(data) }],
         };
-      } catch (e) {
+      } catch (error) {
         return {
           isError: true,
           content: [
             {
               type: "text" as const,
-              text: e instanceof Error ? e.message : "Robot tool failed",
+              text:
+                error instanceof Error ? error.message : "Robot tool failed",
             },
           ],
         };

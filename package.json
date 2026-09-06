@@ -10,8 +10,10 @@
     "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
-    "check:fast": "bun run format:check && bun run typecheck",
-    "check": "bun run check:fast && bun run test",
+    "check:fast": "bun run format:check && bun run lint && bun run typecheck",
+    "check": "bun run check:fast && bun run lint:types && bun run test",
+    "lint": "oxlint .",
+    "lint:types": "oxlint --type-aware --report-unused-disable-directives .",
     "cli": "bun src/cli.ts",
     "mcp": "bun src/mcp.ts"
   },
@@ -24,11 +26,14 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.81.0",
     "@types/bun": "1.4.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "@vitejs/plugin-react": "6.1.1",
     "oxfmt": "0.66.0",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
     "typescript": "7.0.2",
     "ultracite": "7.10.8",
     "vite": "8.2.2"

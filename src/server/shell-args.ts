@@ -18,7 +18,7 @@ export function dockerArguments(o: DockerShellOptions): string[] {
     "run",
     "--rm",
     "--name",
-    "robo-shell-" + o.id,
+    `robo-shell-${o.id}`,
     "--interactive",
     "--init",
     "--cap-drop=ALL",
@@ -27,15 +27,15 @@ export function dockerArguments(o: DockerShellOptions): string[] {
     "--memory=2g",
     "--cpus=2",
     "--user",
-    o.uid + ":" + o.gid,
+    `${o.uid}:${o.gid}`,
     "--mount",
-    "type=bind,source=" + o.workspace + ",target=/workspace",
+    `type=bind,source=${o.workspace},target=/workspace`,
     "--network",
     o.network,
     "--env",
-    "ROBO_URL=" + o.programUrl,
+    `ROBO_URL=${o.programUrl}`,
     "--env",
-    "ROBO_TOKEN=" + o.token,
+    `ROBO_TOKEN=${o.token}`,
     "--workdir",
     "/workspace",
     "--env",
@@ -47,9 +47,12 @@ export function dockerArguments(o: DockerShellOptions): string[] {
     "-s",
   ];
 }
-export function shellNetwork(value: string | undefined): ShellNetwork {
-  if (value === undefined || value === "" || value === "bridge")
+export function shellNetwork(value?: string): ShellNetwork {
+  if (value === undefined || value === "" || value === "bridge") {
     return "bridge";
-  if (value === "host") return "host";
+  }
+  if (value === "host") {
+    return "host";
+  }
   throw new Error("ROBO_SHELL_NETWORK must be bridge or host");
 }

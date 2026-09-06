@@ -6,6 +6,7 @@ import {
   parseCursor,
   trustedSource,
 } from "../src/server/access";
+
 describe("trustedSource", () => {
   const trust = { loopback: false, blocked: new Set(["100.77.154.45"]) };
   test("accepts tailnet peers only", () => {

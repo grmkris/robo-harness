@@ -1,12 +1,13 @@
-import { tool, jsonSchema, type ToolSet } from "ai";
+import { tool, jsonSchema } from "ai";
+import type { ToolSet } from "ai";
 import { z } from "zod";
 
-import type { Frame } from "../shared/contracts";
-import { toolSchemas, type ToolName } from "../shared/contracts";
+import { type Frame, toolSchemas, type ToolName } from "../shared/contracts";
 import { perceive } from "./perception";
 import { startRecording, stopRecording } from "./recordings";
 import * as robot from "./robot";
 import { shell } from "./shell";
+
 export interface Principal {
   owner: string;
   human: boolean;
@@ -41,32 +42,43 @@ export async function executeTool(
   signal?.throwIfAborted();
   const input = toolSchemas[name].parse(raw);
   switch (name) {
-    case "observe":
+    case "observe": {
       return robot.freshObservation();
-    case "capture":
+    }
+    case "capture": {
       return robot.capture((input as { camera: string }).camera);
+    }
     case "acquire": {
       const v = input as { mode: string; takeover: boolean };
       return robot.acquire(p.owner, v.mode, v.takeover, p.human);
     }
-    case "renew":
+    case "renew": {
       return robot.renew(p.owner);
-    case "release":
+    }
+    case "release": {
       return robot.release(p.owner);
-    case "move":
+    }
+    case "move": {
       return robot.move(p.owner, input as robot.MoveInput);
-    case "operation":
+    }
+    case "operation": {
       return robot.operation((input as { id: string }).id);
-    case "stop":
+    }
+    case "stop": {
       return robot.stop();
-    case "perceive":
+    }
+    case "perceive": {
       return perceive(input as Parameters<typeof perceive>[0], signal);
-    case "recording_start":
+    }
+    case "recording_start": {
       return startRecording((input as { label: string }).label);
-    case "recording_stop":
+    }
+    case "recording_stop": {
       return stopRecording();
-    case "shell":
+    }
+    case "shell": {
       return shell(input as Parameters<typeof shell>[0], p.owner, signal);
+    }
   }
 }
 export function agentTools(
@@ -88,7 +100,9 @@ export function agentTools(
             const output = await executeTool(name, input, p, signal);
             if (name === "capture") {
               const frame = output as Frame;
-              if (vision) onImage?.(frame);
+              if (vision) {
+                onImage?.(frame);
+              }
               return {
                 ...frame,
                 base64: undefined,
@@ -98,8 +112,10 @@ export function agentTools(
               };
             }
             return output;
-          } catch (e) {
-            return { error: e instanceof Error ? e.message : "Tool failed" };
+          } catch (error) {
+            return {
+              error: error instanceof Error ? error.message : "Tool failed",
+            };
           }
         },
         toModelOutput: ({ output }: { output: unknown }) => ({

@@ -10,6 +10,7 @@ import type {
 } from "../shared/contracts";
 import { config } from "./config";
 import { emit } from "./store";
+
 export type MoveInput = z.infer<typeof moveSchema>;
 export class ApiError extends Error {
   status: number;
@@ -26,27 +27,30 @@ export async function io<T>(
   const res = await fetch(config.ioUrl + path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
-      Authorization: "Bearer " + config.ioToken,
+      Authorization: `Bearer ${config.ioToken}`,
       "Content-Type": "application/json",
     },
     body: body === undefined ? null : JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
   const data = (await res.json()) as T & { error?: string; detail?: unknown };
-  if (!res.ok)
+  if (!res.ok) {
     throw new ApiError(data.error ?? "Robot request failed", res.status);
+  }
   return data;
 }
-type Controller = {
+interface Controller {
   lease: Lease;
   owner: string;
   mode: string;
   expires: number;
-};
+}
 const controllers = new Map<string, Controller>();
 let stopping = false;
 const refuseWhileStopping = () => {
-  if (stopping) throw new ApiError("A stop is in progress", 409);
+  if (stopping) {
+    throw new ApiError("A stop is in progress", 409);
+  }
 };
 export let current: Observation | null = null;
 export let currentFrames: Partial<Record<string, Frame>> = {};
@@ -81,7 +85,9 @@ export async function sample() {
     ["workspace", workspace],
     ["wrist", wrist],
   ] as const) {
-    if (result.status === "fulfilled") currentFrames[name] = result.value;
+    if (result.status === "fulfilled") {
+      currentFrames[name] = result.value;
+    }
   }
   if (prev?.boot_id !== current.boot_id) {
     controllers.clear();
@@ -94,10 +100,12 @@ export async function sample() {
     current.operation &&
     JSON.stringify(prev?.operation) !== JSON.stringify(current.operation) &&
     prev?.operation?.status !== current.operation.status
-  )
+  ) {
     emit("motion.status", { ...current.operation });
-  if (current.fault && prev?.fault !== current.fault)
+  }
+  if (current.fault && prev?.fault !== current.fault) {
     emit("robot.fault", { message: current.fault });
+  }
 }
 export function freshObservation() {
   if (
@@ -105,8 +113,9 @@ export function freshObservation() {
     Date.now() - receivedAt > 500 ||
     current.age_ms > 250 ||
     robotError
-  )
+  ) {
     throw new ApiError("Robot observation is stale or unavailable", 503);
+  }
   const elapsed = Date.now() - receivedAt;
   return {
     ...current,
@@ -122,9 +131,9 @@ export function freshObservation() {
 }
 export async function capture(camera: string, frameId?: string) {
   return await io<Frame>(
-    "/frames/" +
-      encodeURIComponent(camera) +
-      (frameId ? "?frame_id=" + encodeURIComponent(frameId) : "")
+    `/frames/${encodeURIComponent(
+      camera
+    )}${frameId ? "?frame_id=" + encodeURIComponent(frameId) : ""}`
   );
 }
 export async function acquire(
@@ -133,14 +142,17 @@ export async function acquire(
   takeover: boolean,
   human: boolean
 ) {
-  if (!human && (mode !== "agent" || takeover))
+  if (!human && (mode !== "agent" || takeover)) {
     throw new ApiError(
       "Only a human operator can take over or enable leader mode",
       403
     );
+  }
   refuseWhileStopping();
   const lease = await io<Lease>("/control/acquire", { owner, mode, takeover });
-  if (takeover) controllers.clear();
+  if (takeover) {
+    controllers.clear();
+  }
   controllers.set(owner, {
     lease,
     owner,
@@ -154,7 +166,9 @@ export async function acquire(
 // engine would refuse it, but refusing here keeps the wire quiet and the error precise.
 function liveController(owner: string) {
   const c = controllers.get(owner);
-  if (!c) throw new ApiError("Acquire control first");
+  if (!c) {
+    throw new ApiError("Acquire control first");
+  }
   if (c.expires <= Date.now()) {
     controllers.delete(owner);
     throw new ApiError("Control lease expired; acquire control again", 409);
@@ -172,7 +186,9 @@ export async function renew(owner: string) {
 }
 export async function release(owner: string) {
   const c = controllers.get(owner);
-  if (!c) return { released: true };
+  if (!c) {
+    return { released: true };
+  }
   try {
     return await io("/control/release", { owner, lease_id: c.lease.lease_id });
   } finally {
@@ -185,18 +201,22 @@ export async function move(owner: string, body: MoveInput) {
   if (body.target) {
     // The observation carries the commissioned limits; a target outside them is
     // refused before it reaches the motor owner, naming the joint.
-    const limits = freshObservation().limits;
-    for (const [joint, value] of Object.entries(body.target) as Array<
-      [Joint, number]
-    >) {
+    const { limits } = freshObservation();
+    for (const [joint, value] of Object.entries(body.target) as [
+      Joint,
+      number,
+    ][]) {
       const range = limits[joint];
-      if (!range) throw new ApiError("Unknown joint " + joint, 422);
+      if (!range) {
+        throw new ApiError("Unknown joint " + joint, 422);
+      }
       const [min, max] = range;
-      if (value < min || value > max)
+      if (value < min || value > max) {
         throw new ApiError(
           `Target for ${joint} (${value}) is outside the commissioned range ${min}..${max}`,
           422
         );
+      }
     }
   }
   const op = await io<Operation>("/operations", {
@@ -220,8 +240,8 @@ export async function stop() {
         controllers.clear();
         emit("control.stopped", {});
         return result;
-      } catch (e) {
-        failure = e;
+      } catch (error) {
+        failure = error;
       }
     }
     controllers.clear();
@@ -229,9 +249,9 @@ export async function stop() {
       failure instanceof Error ? failure.message : "Robot did not answer";
     emit("control.stop_failed", { message });
     throw new ApiError(
-      "Robot did not confirm the stop (" +
-        message +
-        "); local control is revoked and motion expires with the lease",
+      `Robot did not confirm the stop (${
+        message
+      }); local control is revoked and motion expires with the lease`,
       502
     );
   } finally {
@@ -239,4 +259,4 @@ export async function stop() {
   }
 }
 export const operation = (id: string) =>
-  io<Operation>("/operations/" + encodeURIComponent(id));
+  io<Operation>(`/operations/${encodeURIComponent(id)}`);

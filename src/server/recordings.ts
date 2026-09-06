@@ -12,6 +12,7 @@ import type { AppEvent } from "../shared/contracts";
 import { config } from "./config";
 import { freshObservation, currentFrames, clock, ApiError } from "./robot";
 import { db, emit } from "./store";
+
 export interface Recording {
   id: string;
   label: string;
@@ -28,18 +29,22 @@ let skipped = 0;
 let stopping = false;
 const known = new Set<string>();
 export function noteMissedSample() {
-  if (active?.state === "recording") skipped++;
+  if (active?.state === "recording") {
+    skipped++;
+  }
 }
 export const recordings = () =>
   db
     .query("SELECT * FROM recordings ORDER BY created DESC LIMIT 100")
     .all() as Recording[];
 export async function startRecording(label: string) {
-  if (active) throw new ApiError("A recording is already active");
+  if (active) {
+    throw new ApiError("A recording is already active");
+  }
   const obs = freshObservation();
-  const id = crypto.randomUUID(),
-    path = join(config.dataDir, "recordings", id),
-    created = Date.now();
+  const id = crypto.randomUUID();
+  const path = join(config.dataDir, "recordings", id);
+  const created = Date.now();
   active = {
     id,
     label,
@@ -54,11 +59,12 @@ export async function startRecording(label: string) {
     await mkdir(join(path, "images"), { recursive: true });
     await mkdir(join(path, "programs"), { recursive: true });
     const stat = await statfs(path);
-    if (stat.bavail * stat.bsize < 512 * 1024 * 1024)
+    if (stat.bavail * stat.bsize < 512 * 1024 * 1024) {
       throw new ApiError("Less than 512 MiB storage available", 507);
-    const urdf = await readFile(config.root + "/assets/so101.urdf");
+    }
+    const urdf = await readFile(`${config.root}/assets/so101.urdf`);
     await writeFile(
-      path + "/manifest.json",
+      `${path}/manifest.json`,
       JSON.stringify(
         {
           version: 1,
@@ -88,13 +94,15 @@ export async function startRecording(label: string) {
     stopping = false;
     emit("recording.started", { id, label });
     return active;
-  } catch (e) {
+  } catch (error) {
     active = null;
-    throw e;
+    throw error;
   }
 }
 export async function recordSample() {
-  if (!active || active.state !== "recording" || stopping) return;
+  if (!active || active.state !== "recording" || stopping) {
+    return;
+  }
   if (writing) {
     skipped++;
     return;
@@ -104,15 +112,16 @@ export async function recordSample() {
   try {
     const obs = freshObservation();
     const stat = await statfs(record.path);
-    if (stat.bavail * stat.bsize < 512 * 1024 * 1024)
+    if (stat.bavail * stat.bsize < 512 * 1024 * 1024) {
       throw new Error("Recording stopped: storage reserve reached");
+    }
     const images: Record<string, unknown> = {};
     for (const name of ["workspace", "wrist"]) {
       const frame = currentFrames[name];
-      if (!frame || frame.age_ms > 500)
+      if (!frame || frame.age_ms > 500) {
         throw new Error("Recording stopped: required camera unavailable");
-      const filename =
-        name + "-" + frame.id.replaceAll(/[^a-zA-Z0-9-]/g, "_") + ".jpg";
+      }
+      const filename = `${name}-${frame.id.replaceAll(/[^a-zA-Z0-9-]/g, "_")}.jpg`;
       if (!known.has(frame.id)) {
         await writeFile(
           join(record.path, "images", filename),
@@ -123,27 +132,27 @@ export async function recordSample() {
       images[name] = {
         ...frame,
         base64: undefined,
-        path: "images/" + filename,
+        path: `images/${filename}`,
       };
     }
     await appendFile(
-      record.path + "/samples.jsonl",
-      JSON.stringify({
+      `${record.path}/samples.jsonl`,
+      `${JSON.stringify({
         index: record.frames,
         observation: obs,
         images,
         clock,
         sample_time_ms: Date.now(),
-      }) + "\n"
+      })}\n`
     );
     record.frames++;
     db.query("UPDATE recordings SET frames=? WHERE id=?").run(
       record.frames,
       record.id
     );
-  } catch (e) {
+  } catch (error) {
     record.state = "incomplete";
-    record.error = e instanceof Error ? e.message : "Recording failed";
+    record.error = error instanceof Error ? error.message : "Recording failed";
     db.query("UPDATE recordings SET state='incomplete',error=? WHERE id=?").run(
       record.error,
       record.id
@@ -158,7 +167,9 @@ export async function recordEvent(event: AppEvent) {
   // change `active` while the program file is read, and the event must land in
   // the recording that was live when it happened.
   const record = active;
-  if (!record) return;
+  if (!record) {
+    return;
+  }
   if (
     event.type === "shell.completed" &&
     typeof event.data["program_sha256"] === "string"
@@ -166,20 +177,24 @@ export async function recordEvent(event: AppEvent) {
     const hash = event.data["program_sha256"];
     if (/^[a-f0-9]{64}$/.test(hash)) {
       await writeFile(
-        record.path + "/programs/" + hash + ".sh",
-        await readFile(config.dataDir + "/programs/" + hash + ".sh")
+        `${record.path}/programs/${hash}.sh`,
+        await readFile(`${config.dataDir}/programs/${hash}.sh`)
       );
     }
   }
-  await appendFile(record.path + "/events.jsonl", JSON.stringify(event) + "\n");
+  await appendFile(`${record.path}/events.jsonl`, `${JSON.stringify(event)}\n`);
 }
 export async function stopRecording() {
-  if (!active) throw new ApiError("No active recording");
+  if (!active) {
+    throw new ApiError("No active recording");
+  }
   stopping = true;
-  while (writing) await Bun.sleep(10);
+  while (writing) {
+    await Bun.sleep(10);
+  }
   const record = active;
   const manifest = JSON.parse(
-    await readFile(record.path + "/manifest.json", "utf8")
+    await readFile(`${record.path}/manifest.json`, "utf-8")
   );
   record.finished = Date.now();
   record.state =
@@ -188,9 +203,9 @@ export async function stopRecording() {
       : skipped
         ? "incomplete"
         : "captured";
-  record.error ??= skipped ? skipped + " sample deadlines were missed" : null;
+  record.error ??= skipped ? `${skipped} sample deadlines were missed` : null;
   await writeFile(
-    record.path + "/manifest.json",
+    `${record.path}/manifest.json`,
     JSON.stringify(
       {
         ...manifest,

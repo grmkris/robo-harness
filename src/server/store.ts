@@ -2,7 +2,8 @@ import { Database } from "bun:sqlite";
 
 import type { AppEvent } from "../shared/contracts";
 import { config } from "./config";
-export const db = new Database(config.dataDir + "/harness.sqlite", {
+
+export const db = new Database(`${config.dataDir}/harness.sqlite`, {
   create: true,
 });
 db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON");
@@ -23,19 +24,21 @@ export function emit(type: string, data: Record<string, unknown>) {
     .query("INSERT INTO events(time,type,data) VALUES(?,?,?)")
     .run(time, type, JSON.stringify(data));
   const event = { id: Number(result.lastInsertRowid), time, type, data };
-  for (const fn of listeners) fn(event);
+  for (const fn of listeners) {
+    fn(event);
+  }
   return event;
 }
 export function events(after = 0, limit = 200): AppEvent[] {
   return (
     db
       .query("SELECT * FROM events WHERE id>? ORDER BY id DESC LIMIT ?")
-      .all(after, limit) as Array<{
+      .all(after, limit) as {
       id: number;
       time: number;
       type: string;
       data: string;
-    }>
+    }[]
   )
     .reverse()
     .map((e) => ({ ...e, data: JSON.parse(e.data) }));

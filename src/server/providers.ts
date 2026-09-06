@@ -4,18 +4,25 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
 import type { ProviderInfo } from "../shared/contracts";
 import { ApiError } from "./robot";
+
 const alibaba =
   "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
 async function xaiToken() {
-  if (process.env["XAI_API_KEY"]) return process.env["XAI_API_KEY"];
+  if (process.env["XAI_API_KEY"]) {
+    return process.env["XAI_API_KEY"];
+  }
   const path = process.env["ROBO_XAI_AUTH_FILE"];
-  if (!path) return null;
+  if (!path) {
+    return null;
+  }
   try {
-    const file = JSON.parse(await readFile(path, "utf8"));
+    const file = JSON.parse(await readFile(path, "utf-8"));
     const record = Object.entries(file).find(([key]) =>
       key.startsWith("https://auth.x.ai::")
     )?.[1] as { key?: string; expires_at?: string | number } | undefined;
-    if (!record?.key) return null;
+    if (!record?.key) {
+      return null;
+    }
     const expiry = record.expires_at;
     const ms =
       typeof expiry === "number"
@@ -29,7 +36,9 @@ async function xaiToken() {
               : Number(expiry)
             : Date.parse(expiry)
           : 0;
-    if (!Number.isFinite(ms) || ms < Date.now() + 60000) return null;
+    if (!Number.isFinite(ms) || ms < Date.now() + 60_000) {
+      return null;
+    }
     return record.key;
   } catch {
     return null;
@@ -80,8 +89,9 @@ export async function catalog(): Promise<ProviderInfo[]> {
 }
 export async function resolveModel(provider: string) {
   const info = (await catalog()).find((p) => p.id === provider);
-  if (!info?.available)
+  if (!info?.available) {
     throw new ApiError(info?.reason ?? "Unknown provider", 422);
+  }
   const client = createOpenAICompatible({
     name: provider,
     baseURL:
@@ -97,12 +107,13 @@ export async function resolveModel(provider: string) {
           fetch: Object.assign(
             async (input: RequestInfo | URL, init?: RequestInit) => {
               const token = await xaiToken();
-              if (!token)
+              if (!token) {
                 throw new Error(
                   "xAI credentials expired; refresh using the owning Grok CLI"
                 );
+              }
               const headers = new Headers(init?.headers);
-              headers.set("Authorization", "Bearer " + token);
+              headers.set("Authorization", `Bearer ${token}`);
               return fetch(input, { ...init, headers });
             },
             { preconnect: fetch.preconnect }

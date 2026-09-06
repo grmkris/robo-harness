@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { callTool } from "./client";
+
 const [name, input = "{}"] = process.argv.slice(2);
 if (!name || name === "--help") {
   console.log(
@@ -10,8 +11,8 @@ if (!name || name === "--help") {
     console.log(
       JSON.stringify(await callTool(name, JSON.parse(input)), null, 2)
     );
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : "Command failed");
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Command failed");
     process.exitCode = 1;
   }
 }
