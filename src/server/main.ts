@@ -92,12 +92,7 @@ async function handle(req: Request): Promise<Response> {
     path = url.pathname;
   if (!["GET", "HEAD"].includes(req.method)) {
     const origin = req.headers.get("origin");
-    if (
-      origin &&
-      ![new URL(req.url).origin, process.env.ROBO_BROWSER_ORIGIN]
-        .filter(Boolean)
-        .includes(origin)
-    )
+    if (origin && !config.allowedOrigins.has(origin))
       return json({ error: "Origin mismatch" }, 403);
   }
   if (path === "/api/login" && req.method === "POST") {

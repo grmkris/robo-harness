@@ -198,6 +198,15 @@ describe("mock HTTP integration", () => {
         })
       ).status,
     ).toBe(200);
+    // A rebound hostname matches its own Host-derived origin; only the allowlist may decide.
+    expect(
+      (
+        await request("/api/tool/stop", {}, operator, {
+          Host: "rebound.example:" + appPort,
+          Origin: "http://rebound.example:" + appPort,
+        })
+      ).status,
+    ).toBe(403);
   });
   test("malformed credentials and prototype names are refused, not crashed", async () => {
     expect((await request("/api/status", undefined, "ü")).status).toBe(401);

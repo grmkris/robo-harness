@@ -38,7 +38,7 @@ if (
   });
 }
 start(["bun", "src/server/main.ts"], {
-  ROBO_BROWSER_ORIGIN: "http://127.0.0.1:5178",
+  ROBO_ALLOWED_ORIGINS: "http://127.0.0.1:5178",
 });
 start([config.root + "/.venv/bin/python", "-m", "robo_harness.telemetry"], {
   ROBO_WORKER_TOKEN: config.workerToken,

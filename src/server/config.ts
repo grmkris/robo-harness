@@ -16,6 +16,18 @@ function secret(name: string, environment?: string) {
     });
   return readFileSync(path, "utf8").trim();
 }
+const host = process.env.ROBO_HOST ?? "127.0.0.1";
+const port = Number(process.env.ROBO_PORT ?? 8940);
+// Browsers may only issue commands from origins listed here. The list is never
+// derived from the request itself: a Host header is attacker-controlled, and a
+// DNS-rebound page would otherwise match its own origin.
+const allowedOrigins = new Set([
+  "http://" + host + ":" + port,
+  ...(process.env.ROBO_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+]);
 export const config = {
   root,
   dataDir,
@@ -24,8 +36,9 @@ export const config = {
   agentToken: secret("agent-token", process.env.ROBO_AGENT_TOKEN),
   ioToken: secret("io-token", process.env.ROBO_IO_TOKEN),
   workerToken: secret("worker-token", process.env.ROBO_WORKER_TOKEN),
-  host: process.env.ROBO_HOST ?? "127.0.0.1",
-  port: Number(process.env.ROBO_PORT ?? 8940),
+  host,
+  port,
+  allowedOrigins,
   ioUrl: process.env.ROBO_IO_URL ?? "http://127.0.0.1:8941",
   rerunWeb: process.env.ROBO_RERUN_WEB ?? "http://127.0.0.1:8942",
   rerunGrpc: process.env.ROBO_RERUN_GRPC ?? "http://127.0.0.1:8943",
