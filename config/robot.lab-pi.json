@@ -1,0 +1,44 @@
+{
+  "backend": "so101",
+  "commissioned": true,
+  "calibration_id": "so101-arm-registers-8924ba1b1461",
+  "port": "/dev/so101_follower",
+  "leader_port": "/dev/so101_leader",
+  "robot_id": "arm",
+  "calibration_dir": "/home/kris/robo-harness/calibration/follower",
+  "urdf": "/home/kris/robo-harness/assets/so101.urdf",
+  "joint_offsets_deg": {
+    "shoulder_pan": 0,
+    "shoulder_lift": 0,
+    "elbow_flex": 0,
+    "wrist_flex": 0,
+    "wrist_roll": 0
+  },
+  "limits": {
+    "shoulder_pan": [-111.86813186813187, 111.86813186813187],
+    "shoulder_lift": [-111.34065934065934, 111.34065934065934],
+    "elbow_flex": [-98.41758241758242, 98.41758241758242],
+    "wrist_flex": [-103.03296703296704, 103.03296703296704],
+    "wrist_roll": [-180.0, 180.0],
+    "gripper": [0, 100]
+  },
+  "max_speed": 2,
+  "max_step": 2,
+  "workspace_min": [-0.5, -0.5, -0.1],
+  "workspace_max": [0.5, 0.5, 0.5],
+  "link_radius_m": 0.015,
+  "table_z_m": -0.08,
+  "keepout_boxes": [],
+  "camera_mode": "lab",
+  "camera_devices": {
+    "workspace": "/dev/cam_context",
+    "wrist": "/dev/cam_wrist"
+  },
+  "camera_calibrations": {},
+  "hold_mode": "commanded",
+  "profile_review": "2026-09-06: user confirmed clear workspace and powered activation. Calibration recovered from both motor buses without changing calibration registers. Initial joint control only, <=2 degrees/percent and <=2 units/s; inherited lab URDF for visualization, Cartesian geometry not commissioned.",
+  "leader_id": "arm",
+  "leader_calibration_dir": "/home/kris/robo-harness/calibration/leader",
+  "camera_session_path": "/home/kris/robo-harness/var/camera-session.json",
+  "cartesian_reviewed": false
+}

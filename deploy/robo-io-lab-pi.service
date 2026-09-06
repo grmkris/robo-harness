@@ -1,0 +1,20 @@
+[Unit]
+Description=Robo Harness SO-101 motor and camera owner
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Conflicts=labcam-preview.service
+
+[Service]
+Type=simple
+User=kris
+WorkingDirectory=/home/kris/robo-harness
+Environment=PYTHONPATH=/home/kris/robo-harness/python
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+EnvironmentFile=/home/kris/robo-harness/var/io.env
+ExecStart=/home/kris/robo-harness/.venv/bin/python -m robo_harness.service --profile config/robot.lab-pi.json --host 100.77.154.45
+Restart=no
+TimeoutStopSec=12
+UMask=0077
+
+# Start explicitly after checking hardware. No automatic motor activation on boot.

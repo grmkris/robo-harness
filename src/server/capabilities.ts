@@ -1,0 +1,19 @@
+import { randomBytes } from "node:crypto";
+const capabilities = new Map<string, { owner: string; expires: number }>();
+export function issueCapability(owner: string, seconds: number) {
+  const token = randomBytes(32).toString("hex");
+  capabilities.set(token, {
+    owner: "program-" + owner,
+    expires: Date.now() + seconds * 1000,
+  });
+  return { token, revoke: () => capabilities.delete(token) };
+}
+export function getCapability(token: string) {
+  const value = capabilities.get(token);
+  if (!value) return null;
+  if (value.expires < Date.now()) {
+    capabilities.delete(token);
+    return null;
+  }
+  return { owner: value.owner, human: false, program: true };
+}

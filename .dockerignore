@@ -1,0 +1,6 @@
+var
+.env
+.venv
+node_modules
+dist
+.git

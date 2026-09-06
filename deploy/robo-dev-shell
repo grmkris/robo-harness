@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Install only in the dedicated, unprivileged Pi development account."""
+import os
+import json
+from pathlib import Path
+import subprocess
+import sys
+seconds=int(sys.argv[1])
+if not 1<=seconds<=120:
+    raise SystemExit("Invalid command deadline")
+workspace=Path.home()/"robo-workspace"
+workspace.mkdir(exist_ok=True)
+payload=json.loads(sys.stdin.read(20000))
+script=payload["command"]
+if len(script)>16000:
+    raise SystemExit("Command too large")
+environment={"PATH":str(Path.home()/"robo-venv/bin")+":/usr/local/bin:/usr/bin:/bin","HOME":str(Path.home()),"PYTHONUNBUFFERED":"1"}
+if payload.get("url"):
+    environment.update(ROBO_URL=payload["url"],ROBO_TOKEN=payload["token"])
+process=subprocess.Popen(["sh","-s"],cwd=workspace,env=environment,stdin=subprocess.PIPE,start_new_session=True)
+try:
+    process.communicate(script.encode(),timeout=seconds)
+except subprocess.TimeoutExpired:
+    import signal
+    os.killpg(process.pid,signal.SIGKILL)
+    raise SystemExit(124)
+raise SystemExit(process.returncode)

@@ -1,0 +1,16 @@
+[Unit]
+Description=Robo Harness workbench
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/kristjan/code/robo-harness
+EnvironmentFile=/home/kristjan/code/robo-harness/.env
+ExecStart=/home/kristjan/.bun/bin/bun src/server/main.ts
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "robo-harness": {
+      "command": "/home/kristjan/.bun/bin/bun",
+      "args": ["/home/kristjan/code/robo-harness/src/mcp.ts"],
+      "env": {
+        "ROBO_URL": "http://100.105.51.45:8940",
+        "ROBO_CONTROLLER": "my-robot-agent"
+      }
+    }
+  }
+}

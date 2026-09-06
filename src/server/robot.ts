@@ -1,0 +1,172 @@
+import { config } from "./config";
+import { emit } from "./store";
+import type { Observation, Frame, Lease, Operation } from "../shared/contracts";
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status = 409,
+  ) {
+    super(message);
+  }
+}
+export async function io<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(config.ioUrl + path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      Authorization: "Bearer " + config.ioToken,
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(2000),
+  });
+  const data = (await res.json()) as T & { error?: string; detail?: unknown };
+  if (!res.ok)
+    throw new ApiError(data.error ?? "Robot request failed", res.status);
+  return data;
+}
+type Controller = {
+  lease: Lease;
+  owner: string;
+  mode: string;
+  expires: number;
+};
+const controllers = new Map<string, Controller>();
+export let current: Observation | null = null;
+export let currentFrames: Partial<Record<string, Frame>> = {};
+export let robotError: string | null = "Waiting for robot service";
+export let receivedAt = 0;
+export let clock = { offset_ms: 0, uncertainty_ms: 0, domain: "" };
+export async function sample() {
+  const sent = Date.now();
+  const [o, workspace, wrist] = await Promise.allSettled([
+    io<Observation>("/observe"),
+    io<Frame>("/frames/workspace"),
+    io<Frame>("/frames/wrist"),
+  ]);
+  const received = Date.now();
+  if (o.status === "rejected") {
+    robotError =
+      o.reason instanceof Error ? o.reason.message : "Robot unavailable";
+    return;
+  }
+  const prev = current;
+  current = o.value;
+  receivedAt = received;
+  robotError = null;
+  clock = {
+    offset_ms:
+      (sent + received) / 2 - (current.server_time_ms ?? current.wall_time_ms),
+    uncertainty_ms: (received - sent) / 2,
+    domain: current.clock_domain,
+  };
+  currentFrames = {};
+  for (const [name, result] of [
+    ["workspace", workspace],
+    ["wrist", wrist],
+  ] as const) {
+    if (result.status === "fulfilled") currentFrames[name] = result.value;
+  }
+  if (prev?.boot_id !== current.boot_id) {
+    controllers.clear();
+    emit("robot.connected", {
+      backend: current.backend,
+      boot_id: current.boot_id,
+    });
+  }
+  if (
+    current.operation &&
+    JSON.stringify(prev?.operation) !== JSON.stringify(current.operation) &&
+    prev?.operation?.status !== current.operation.status
+  )
+    emit("motion.status", { ...current.operation });
+  if (current.fault && prev?.fault !== current.fault)
+    emit("robot.fault", { message: current.fault });
+}
+export function freshObservation() {
+  if (
+    !current ||
+    Date.now() - receivedAt > 500 ||
+    current.age_ms > 250 ||
+    robotError
+  )
+    throw new ApiError("Robot observation is stale or unavailable", 503);
+  const elapsed = Date.now() - receivedAt;
+  return {
+    ...current,
+    age_ms: current.age_ms + elapsed,
+    operator:
+      current.operator && current.operator.remaining_ms > elapsed
+        ? {
+            ...current.operator,
+            remaining_ms: current.operator.remaining_ms - elapsed,
+          }
+        : null,
+  };
+}
+export async function capture(camera: string, frameId?: string) {
+  return await io<Frame>(
+    "/frames/" +
+      encodeURIComponent(camera) +
+      (frameId ? "?frame_id=" + encodeURIComponent(frameId) : ""),
+  );
+}
+export async function acquire(
+  owner: string,
+  mode: string,
+  takeover: boolean,
+  human: boolean,
+) {
+  if (!human && (mode !== "agent" || takeover))
+    throw new ApiError(
+      "Only a human operator can take over or enable leader mode",
+      403,
+    );
+  const lease = await io<Lease>("/control/acquire", { owner, mode, takeover });
+  if (takeover) controllers.clear();
+  controllers.set(owner, {
+    lease,
+    owner,
+    mode,
+    expires: Date.now() + lease.ttl_ms,
+  });
+  emit("control.acquired", { owner, mode, takeover });
+  return lease;
+}
+export async function renew(owner: string) {
+  const c = controllers.get(owner);
+  if (!c) throw new ApiError("Acquire control first");
+  const lease = await io<Lease>("/control/renew", {
+    owner,
+    lease_id: c.lease.lease_id,
+  });
+  c.expires = Date.now() + lease.ttl_ms;
+  return lease;
+}
+export async function release(owner: string) {
+  const c = controllers.get(owner);
+  if (!c) return { released: true };
+  try {
+    return await io("/control/release", { owner, lease_id: c.lease.lease_id });
+  } finally {
+    controllers.delete(owner);
+  }
+}
+export async function move(owner: string, body: unknown) {
+  const c = controllers.get(owner);
+  if (!c) throw new ApiError("Acquire control first");
+  const op = await io<Operation>("/operations", {
+    ...(body as object),
+    owner,
+    lease_id: c.lease.lease_id,
+  });
+  emit("motion.submitted", { ...op });
+  return op;
+}
+export async function stop() {
+  controllers.clear();
+  const result = await io<Observation>("/control/stop", {});
+  emit("control.stopped", {});
+  return result;
+}
+export const operation = (id: string) =>
+  io<Operation>("/operations/" + encodeURIComponent(id));
