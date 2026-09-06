@@ -39,6 +39,9 @@ if (
 }
 start(["bun", "src/server/main.ts"], {
   ROBO_ALLOWED_ORIGINS: "http://127.0.0.1:5178",
+  // Development binds to loopback, which bridge containers cannot reach. Host
+  // networking is acceptable here only because the hardware is mocked.
+  ROBO_SHELL_NETWORK: process.env.ROBO_SHELL_NETWORK ?? "host",
 });
 start([config.root + "/.venv/bin/python", "-m", "robo_harness.telemetry"], {
   ROBO_WORKER_TOKEN: config.workerToken,

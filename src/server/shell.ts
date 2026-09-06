@@ -1,7 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { issueCapability } from "./capabilities";
+import { isLoopback } from "./access";
 import { config } from "./config";
+import { dockerArguments, shellNetwork } from "./shell-args";
 import { emit } from "./store";
 import { ApiError } from "./robot";
 export async function shell(
@@ -18,6 +20,7 @@ export async function shell(
   await writeFile(config.dataDir + "/programs/" + hash + ".sh", input.command, {
     mode: 0o600,
   });
+  const capability = issueCapability(id, input.timeout_s + 5);
   let command: string[];
   if (input.host === "pi") {
     const host = process.env.ROBO_PI_DEV_HOST;
@@ -40,51 +43,29 @@ export async function shell(
       String(input.timeout_s),
     ];
   } else {
-    command = [
-      "docker",
-      "run",
-      "--rm",
-      "--name",
-      "robo-shell-" + id,
-      "--interactive",
-      "--init",
-      "--cap-drop=ALL",
-      "--security-opt=no-new-privileges",
-      "--pids-limit=128",
-      "--memory=2g",
-      "--cpus=2",
-      "--user",
-      String(process.getuid?.() ?? 1000) +
-        ":" +
-        String(process.getgid?.() ?? 1000),
-      "--mount",
-      "type=bind,source=" + workspace + ",target=/workspace",
-      "--workdir",
-      "/workspace",
-      "--env",
-      "HOME=/workspace",
-      "--env",
-      "PIP_USER=1",
-      process.env.ROBO_DEV_IMAGE ?? "robo-harness-dev:local",
-      "sh",
-      "-s",
-    ];
-  }
-  const capability = issueCapability(id, input.timeout_s + 5);
-  if (input.host === "netcup") {
-    const at = command.indexOf("--workdir");
-    command.splice(
-      at,
-      0,
-      "--network",
-      "host",
-      "--env",
-      "ROBO_URL=" +
-        (process.env.ROBO_PROGRAM_URL ??
-          "http://" + config.host + ":" + config.port),
-      "--env",
-      "ROBO_TOKEN=" + capability.token,
-    );
+    const network = shellNetwork(process.env.ROBO_SHELL_NETWORK);
+    // Bridge containers cannot reach a loopback-bound server; the tailnet bind
+    // address is reachable from the bridge because the host owns it.
+    const programUrl =
+      process.env.ROBO_PROGRAM_URL ??
+      (isLoopback(config.host)
+        ? null
+        : "http://" + config.host + ":" + config.port);
+    if (!programUrl)
+      throw new ApiError(
+        "Set ROBO_PROGRAM_URL to an address containers can reach, or bind the application to a tailnet address",
+        422,
+      );
+    command = dockerArguments({
+      id,
+      workspace,
+      image: process.env.ROBO_DEV_IMAGE ?? "robo-harness-dev:local",
+      uid: process.getuid?.() ?? 1000,
+      gid: process.getgid?.() ?? 1000,
+      network,
+      programUrl,
+      token: capability.token,
+    });
   }
   const proc = Bun.spawn(command, {
     stdin: "pipe",

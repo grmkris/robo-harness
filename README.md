@@ -76,7 +76,7 @@ Build the local development image:
 docker build -f deploy/dev.Dockerfile -t robo-harness-dev:local .
 ```
 
-The terminal and agent shell run in a container with only their task workspace mounted. They receive a short-lived program credential, no provider or hardware-service credentials, no Docker socket, and no motor devices. The container uses host networking to reach the authenticated local API and install dependencies. CPU, memory, process count, output size, and command duration are bounded. Python programs import `Robot` from `robo_client` in this image.
+The terminal and agent shell run in a container with only their task workspace mounted. They receive a short-lived program credential, no provider or hardware-service credentials, no Docker socket, and no motor devices. The container runs on Docker's bridge network and reaches the authenticated API through `ROBO_PROGRAM_URL`, which defaults to the tailnet bind address; `ROBO_SHELL_NETWORK=host` is a development-only escape hatch for a loopback-bound server with mock hardware. CPU, memory, process count, output size, and command duration are bounded. Python programs import `Robot` from `robo_client` in this image.
 
 Optional Pi development uses an explicitly configured dedicated SSH account and `deploy/robo-dev-shell`. That account must have no sudo, no device groups, no production secret access, and no write access to the deployed service or reviewed profile. Dependency installation belongs in its own virtual environment. Provisioning this account is a separate reviewed deployment step.
 
