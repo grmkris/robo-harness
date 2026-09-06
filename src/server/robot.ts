@@ -18,7 +18,11 @@ export class ApiError extends Error {
     super(message);
   }
 }
-export async function io<T>(path: string, body?: unknown): Promise<T> {
+export async function io<T>(
+  path: string,
+  body?: unknown,
+  timeoutMs = 2000,
+): Promise<T> {
   const res = await fetch(config.ioUrl + path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
@@ -26,7 +30,7 @@ export async function io<T>(path: string, body?: unknown): Promise<T> {
       "Content-Type": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(2000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = (await res.json()) as T & { error?: string; detail?: unknown };
   if (!res.ok)
@@ -40,6 +44,10 @@ type Controller = {
   expires: number;
 };
 const controllers = new Map<string, Controller>();
+let stopping = false;
+const refuseWhileStopping = () => {
+  if (stopping) throw new ApiError("A stop is in progress", 409);
+};
 export let current: Observation | null = null;
 export let currentFrames: Partial<Record<string, Frame>> = {};
 export let robotError: string | null = "Waiting for robot service";
@@ -130,6 +138,7 @@ export async function acquire(
       "Only a human operator can take over or enable leader mode",
       403,
     );
+  refuseWhileStopping();
   const lease = await io<Lease>("/control/acquire", { owner, mode, takeover });
   if (takeover) controllers.clear();
   controllers.set(owner, {
@@ -171,6 +180,7 @@ export async function release(owner: string) {
   }
 }
 export async function move(owner: string, body: MoveInput) {
+  refuseWhileStopping();
   const c = liveController(owner);
   if (body.target) {
     // The observation carries the commissioned limits; a target outside them is
@@ -197,11 +207,36 @@ export async function move(owner: string, body: MoveInput) {
   emit("motion.submitted", { ...op });
   return op;
 }
+// Stop is retried because it is the one call that must not fail on a hiccup.
+// Local leases are revoked whether or not the robot confirmed: with no
+// heartbeat left, the motor owner cancels motion when the lease expires.
 export async function stop() {
-  controllers.clear();
-  const result = await io<Observation>("/control/stop", {});
-  emit("control.stopped", {});
-  return result;
+  stopping = true;
+  try {
+    let failure: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await io<Observation>("/control/stop", {}, 1500);
+        controllers.clear();
+        emit("control.stopped", {});
+        return result;
+      } catch (e) {
+        failure = e;
+      }
+    }
+    controllers.clear();
+    const message =
+      failure instanceof Error ? failure.message : "Robot did not answer";
+    emit("control.stop_failed", { message });
+    throw new ApiError(
+      "Robot did not confirm the stop (" +
+        message +
+        "); local control is revoked and motion expires with the lease",
+      502,
+    );
+  } finally {
+    stopping = false;
+  }
 }
 export const operation = (id: string) =>
   io<Operation>("/operations/" + encodeURIComponent(id));

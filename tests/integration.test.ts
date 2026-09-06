@@ -271,6 +271,28 @@ describe("mock HTTP integration", () => {
     expect((await call("renew", {}, agentToken)).status).toBe(409);
     await call("release");
   });
+  test("stop cancels a running move, revokes control and allows a fresh acquire", async () => {
+    expect((await call("acquire", { mode: "agent" }, agentToken)).status).toBe(
+      200,
+    );
+    const running = await call(
+      "move",
+      { request_id: crypto.randomUUID(), target: { shoulder_pan: -3 }, duration_s: 3 },
+      agentToken,
+    );
+    expect(running.status).toBe(200);
+    expect((await call("stop")).status).toBe(200);
+    expect((await call("operation", { id: running.data.id })).data.status).toBe(
+      "cancelled",
+    );
+    // observe reports the last 100 ms sample, which may predate the stop.
+    await until(async () => (await call("observe")).data.operator === null);
+    expect((await call("renew", {}, agentToken)).status).toBe(409);
+    expect((await call("acquire", { mode: "agent" }, agentToken)).status).toBe(
+      200,
+    );
+    await call("release", {}, agentToken);
+  });
   test("lease expiry cancels continued motion", async () => {
     await call("acquire", { mode: "agent" }, agentToken);
     const result = await call(
