@@ -64,7 +64,7 @@ bun run cli release
 
 A lease lasts three seconds. Renew deliberately while controlling; expiry cancels unfinished motion. Degrees apply to arm joints, percent to the gripper, and meters to Cartesian positions. Accepted means queued, not reached. Poll the operation for measured completion.
 
-Use [the ready MCP configuration](examples/mcp.json) on this machine, or configure command `bun`, arguments `["/home/kristjan/code/robo-harness/src/mcp.ts"]`, and `ROBO_URL=http://100.105.51.45:8940`. Capture tools return actual MCP image blocks. Set a distinct `ROBO_CONTROLLER` per concurrent agent.
+Use [the ready MCP configuration](examples/mcp.json) on this machine, or configure command `bun`, arguments `["/home/kristjan/code/robo-harness-deploy/src/mcp.ts"]`, and `ROBO_URL=http://100.105.51.45:8940`. Capture tools return actual MCP image blocks. Set a distinct `ROBO_CONTROLLER` per concurrent agent.
 
 The Python client is `robo_harness.client.Robot`. Its context manager acquires/releases control, and `move()` renews the lease while awaiting measured completion. See `examples/inspect_and_nudge.py`.
 
@@ -96,7 +96,7 @@ Netcup is the primary recording store. The current Pi SSD is not mounted; no dis
 
 ## Hardware deployment
 
-The deployed rig uses [config/robot.lab-pi.json](config/robot.lab-pi.json); [config/robot.example.json](config/robot.example.json) remains mock-only. Real MCP movement, stop/hold, both cameras, recording/replay, and container observations were verified on 2026-09-06/07. The user confirmed physical readiness and authorized powered movement. See [current deployment](docs/real-arm-preflight.md) and [future commissioning](docs/commissioning.md).
+The lab runs from the `/home/kristjan/code/robo-harness-deploy` worktree (branch `deploy`, promoted from tagged releases) with data under `ROBO_DATA_DIR`; see [deployment](docs/real-arm-preflight.md). The deployed rig uses [config/robot.lab-pi.json](config/robot.lab-pi.json); [config/robot.example.json](config/robot.example.json) remains mock-only. Real MCP movement, stop/hold, both cameras, recording/replay, and container observations were verified on 2026-09-06/07. The user confirmed physical readiness and authorized powered movement. See [current deployment](docs/real-arm-preflight.md) and [future commissioning](docs/commissioning.md).
 
 The implementation follows LeRobot hardware/calibration conventions, adapts the existing lab's camera lock and geometry, and draws on the custom-loop patterns in Invok and the archived harness. It has no runtime dependency on either application.
 

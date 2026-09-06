@@ -5,8 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/kristjan/code/robo-harness
-EnvironmentFile=/home/kristjan/code/robo-harness/.env
+# The deploy worktree is a checkout of the tagged release, never the working tree
+# where development happens; see docs/real-arm-preflight.md "Deployment".
+WorkingDirectory=/home/kristjan/code/robo-harness-deploy
+EnvironmentFile=/home/kristjan/code/robo-harness-deploy/.env
 ExecStart=/home/kristjan/.bun/bin/bun src/server/main.ts
 Restart=on-failure
 RestartSec=3
