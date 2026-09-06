@@ -199,6 +199,15 @@ describe("mock HTTP integration", () => {
       ).status,
     ).toBe(200);
   });
+  test("malformed credentials and prototype names are refused, not crashed", async () => {
+    expect((await request("/api/status", undefined, "ü")).status).toBe(401);
+    expect(
+      (await request("/api/login", { token: "üü" }, "ü", { Origin: base }))
+        .status,
+    ).toBe(401);
+    expect((await call("constructor")).status).toBe(404);
+    expect((await call("__proto__")).status).toBe(404);
+  });
   test("agents cannot impersonate humans or increase compute budgets", async () => {
     expect(
       (await call("acquire", { mode: "human", takeover: true }, agentToken))

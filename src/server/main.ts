@@ -1,10 +1,9 @@
 import { getCapability } from "./capabilities";
-import { timingSafeEqual } from "node:crypto";
 import { resolve, sep } from "node:path";
-import { readFile, readdir } from "node:fs/promises";
+import { equal } from "./access";
 import { config } from "./config";
 import { z } from "zod";
-import { db, emit, events, subscribe } from "./store";
+import { db, events, subscribe } from "./store";
 import * as robot from "./robot";
 import { catalog } from "./providers";
 import * as agent from "./agent";
@@ -21,8 +20,6 @@ let telemetry = {
   version: "",
   recording_id: null as string | null,
 };
-const equal = (a: string, b: string) =>
-  a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const json = (body: unknown, status = 200, headers?: HeadersInit) =>
   Response.json(body, { status, headers });
 const auth = (req: Request): Principal | null => {
@@ -235,7 +232,8 @@ async function handle(req: Request): Promise<Response> {
     }
     if (path.startsWith("/api/tool/") && req.method === "POST") {
       const name = path.slice(10) as ToolName;
-      if (!(name in toolSchemas)) return json({ error: "Unknown tool" }, 404);
+      if (!Object.hasOwn(toolSchemas, name))
+        return json({ error: "Unknown tool" }, 404);
       if ("program" in principal && name === "shell")
         throw new robot.ApiError("Nested development shells are disabled", 403);
       return json(
