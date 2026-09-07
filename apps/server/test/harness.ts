@@ -212,10 +212,11 @@ export async function startHarness(
     app.kill("SIGTERM");
     io?.kill("SIGTERM");
     fixture?.stop(true);
-    await Promise.race([
-      Promise.all([app.exited, io?.exited].filter(Boolean)),
-      Bun.sleep(5000),
-    ]);
+    const exits: Promise<number>[] = [app.exited];
+    if (io) {
+      exits.push(io.exited);
+    }
+    await Promise.race([Promise.all(exits), Bun.sleep(5000)]);
     await rm(directory, { recursive: true, force: true });
   };
 
