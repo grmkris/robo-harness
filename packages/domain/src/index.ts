@@ -1,7 +1,7 @@
 // Robot value types shared by the coordinator, the workbench and the CLI.
 // Defined as Effect Schema so the same declaration validates the wire boundary
 // (the Python I/O service) and produces the TypeScript types.
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 export const joints = [
   "shoulder_pan",
@@ -59,6 +59,8 @@ export const Observation = Schema.Struct({
     Schema.String,
     Schema.Array(Schema.Array(Schema.Finite))
   ),
+  // /control/stop returns an observation without the camera map; default it to
+  // empty so the same schema decodes both, while /observe still carries cameras.
   cameras: Schema.Record(
     Schema.String,
     Schema.Struct({
@@ -66,7 +68,7 @@ export const Observation = Schema.Struct({
       age_ms: Schema.NullOr(Schema.Finite),
       error: Schema.NullOr(Schema.String),
     })
-  ),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   operator: Schema.NullOr(
     Schema.Struct({
       owner: Schema.String,
@@ -95,7 +97,9 @@ export const Frame = Schema.Struct({
   height: Schema.Int,
   media_type: Schema.String,
   base64: Schema.String,
-  calibration: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+  calibration: Schema.optionalKey(
+    Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown))
+  ),
 });
 export type Frame = typeof Frame.Type;
 

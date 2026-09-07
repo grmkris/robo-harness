@@ -165,7 +165,8 @@ describe("mock HTTP integration", () => {
         "cancelled",
       5000
     );
-    expect((await call("observe")).data.operator).toBeNull();
+    // The operator clears a sample after the operation cancels; wait for it.
+    await until(async () => (await call("observe")).data.operator === null);
     const late = await call(
       "move",
       { request_id: crypto.randomUUID(), target: { shoulder_pan: 1 } },

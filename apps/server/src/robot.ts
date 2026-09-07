@@ -1,5 +1,6 @@
-import type { Observation, Frame, Joint, Lease, Operation } from "@robo/domain";
+import { Frame, Lease, Observation, Operation, type Joint } from "@robo/domain";
 import type { MoveInput } from "@robo/protocol";
+import { Schema } from "effect";
 
 import { config } from "./config";
 import { emit } from "./store";
@@ -11,11 +12,12 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
-async function io<T>(
+async function io<S extends Schema.Codec<any>>(
   path: string,
+  schema: S,
   body?: unknown,
   timeoutMs = 2000
-): Promise<T> {
+): Promise<S["Type"]> {
   const res = await fetch(config.ioUrl + path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
@@ -25,11 +27,23 @@ async function io<T>(
     body: body === undefined ? null : JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
-  const data = (await res.json()) as T & { error?: string; detail?: unknown };
+  const data: unknown = await res.json();
   if (!res.ok) {
-    throw new ApiError(data.error ?? "Robot request failed", res.status);
+    const message =
+      typeof data === "object" && data !== null && "error" in data
+        ? String((data as { error: unknown }).error)
+        : "Robot request failed";
+    throw new ApiError(message, res.status);
   }
-  return data;
+  try {
+    return Schema.decodeUnknownSync(schema)(data);
+  } catch (error) {
+    console.error(
+      `Malformed response from ${path}:`,
+      error instanceof Error ? error.message : String(error)
+    );
+    throw new ApiError("Robot service returned an unexpected response", 502);
+  }
 }
 interface Controller {
   lease: Lease;
@@ -52,9 +66,9 @@ export let clock = { offset_ms: 0, uncertainty_ms: 0, domain: "" };
 export async function sample() {
   const sent = Date.now();
   const [o, workspace, wrist] = await Promise.allSettled([
-    io<Observation>("/observe"),
-    io<Frame>("/frames/workspace"),
-    io<Frame>("/frames/wrist"),
+    io("/observe", Observation),
+    io("/frames/workspace", Frame),
+    io("/frames/wrist", Frame),
   ]);
   const received = Date.now();
   if (o.status === "rejected") {
@@ -122,10 +136,11 @@ export function freshObservation() {
   };
 }
 export async function capture(camera: string, frameId?: string) {
-  return await io<Frame>(
+  return await io(
     `/frames/${encodeURIComponent(
       camera
-    )}${frameId ? "?frame_id=" + encodeURIComponent(frameId) : ""}`
+    )}${frameId ? "?frame_id=" + encodeURIComponent(frameId) : ""}`,
+    Frame
   );
 }
 export async function acquire(
@@ -141,7 +156,11 @@ export async function acquire(
     );
   }
   refuseWhileStopping();
-  const lease = await io<Lease>("/control/acquire", { owner, mode, takeover });
+  const lease = await io("/control/acquire", Lease, {
+    owner,
+    mode,
+    takeover,
+  });
   if (takeover) {
     controllers.clear();
   }
@@ -169,7 +188,7 @@ function liveController(owner: string) {
 }
 export async function renew(owner: string) {
   const c = liveController(owner);
-  const lease = await io<Lease>("/control/renew", {
+  const lease = await io("/control/renew", Lease, {
     owner,
     lease_id: c.lease.lease_id,
   });
@@ -182,7 +201,10 @@ export async function release(owner: string) {
     return { released: true };
   }
   try {
-    return await io("/control/release", { owner, lease_id: c.lease.lease_id });
+    return await io("/control/release", Schema.Unknown, {
+      owner,
+      lease_id: c.lease.lease_id,
+    });
   } finally {
     controllers.delete(owner);
   }
@@ -211,7 +233,7 @@ export async function move(owner: string, body: MoveInput) {
       }
     }
   }
-  const op = await io<Operation>("/operations", {
+  const op = await io("/operations", Operation, {
     ...body,
     owner,
     lease_id: c.lease.lease_id,
@@ -228,7 +250,7 @@ export async function stop() {
     let failure: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const result = await io<Observation>("/control/stop", {}, 1500);
+        const result = await io("/control/stop", Observation, {}, 1500);
         controllers.clear();
         emit("control.stopped", {});
         return result;
@@ -251,4 +273,4 @@ export async function stop() {
   }
 }
 export const operation = (id: string) =>
-  io<Operation>(`/operations/${encodeURIComponent(id)}`);
+  io(`/operations/${encodeURIComponent(id)}`, Operation);
