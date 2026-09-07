@@ -59,44 +59,89 @@ const refuseWhileStopping = () => {
   }
 };
 export let current: Observation | null = null;
-export let currentFrames: Partial<Record<string, Frame>> = {};
+const cachedFrames = new Map<string, { frame: Frame; received: number }>();
+const samplingCameras = new Set<string>();
+let observationReceived = 0;
+
+export function frames(): Partial<Record<string, Frame>> {
+  const now = performance.now();
+  return Object.fromEntries(
+    [...cachedFrames].map(([name, cached]) => [
+      name,
+      {
+        ...cached.frame,
+        age_ms: cached.frame.age_ms + Math.max(0, now - cached.received),
+      },
+    ])
+  );
+}
+
+// Each camera has one independent in-flight request. A slow camera must not
+// delay motor observations, the other camera, or reset an older frame's age.
+export async function sampleCamera(camera: string): Promise<void> {
+  if (samplingCameras.has(camera)) return;
+  samplingCameras.add(camera);
+  const sent = performance.now();
+  try {
+    const frame = await io(`/frames/${encodeURIComponent(camera)}`, Frame);
+    const received = performance.now();
+    if (current && frame.clock_domain !== current.clock_domain) return;
+    cachedFrames.set(camera, {
+      frame: { ...frame, age_ms: frame.age_ms + received - sent },
+      received,
+    });
+  } catch {
+    cachedFrames.delete(camera);
+  } finally {
+    samplingCameras.delete(camera);
+  }
+}
 export let robotError: string | null = "Waiting for robot service";
 export let receivedAt = 0;
 export let clock = { offset_ms: 0, uncertainty_ms: 0, domain: "" };
 export async function sample() {
   const sent = Date.now();
-  const [o, workspace, wrist] = await Promise.allSettled([
-    io("/observe", Observation),
-    io("/frames/workspace", Frame),
-    io("/frames/wrist", Frame),
-  ]);
-  const received = Date.now();
-  if (o.status === "rejected") {
-    robotError =
-      o.reason instanceof Error ? o.reason.message : "Robot unavailable";
+  const started = performance.now();
+  let observation: Observation;
+  try {
+    observation = await io("/observe", Observation);
+  } catch (error) {
+    robotError = error instanceof Error ? error.message : "Robot unavailable";
     return;
   }
+  const received = Date.now();
+  observationReceived = performance.now();
+  // The device age excludes transport. The full round trip is a conservative
+  // upper bound on that uncertainty, independent of the hosts' wall clocks.
+  const transit = observationReceived - started;
   const prev = current;
-  current = o.value;
+  current = {
+    ...observation,
+    age_ms: observation.age_ms + transit,
+    operator: observation.operator
+      ? {
+          ...observation.operator,
+          remaining_ms: Math.max(
+            0,
+            observation.operator.remaining_ms - transit
+          ),
+        }
+      : null,
+  };
   receivedAt = received;
   robotError = null;
   clock = {
     offset_ms:
       (sent + received) / 2 - (current.server_time_ms ?? current.wall_time_ms),
-    uncertainty_ms: (received - sent) / 2,
+    uncertainty_ms: transit / 2,
     domain: current.clock_domain,
   };
-  currentFrames = {};
-  for (const [name, result] of [
-    ["workspace", workspace],
-    ["wrist", wrist],
-  ] as const) {
-    if (result.status === "fulfilled") {
-      currentFrames[name] = result.value;
-    }
-  }
   if (prev?.boot_id !== current.boot_id) {
     controllers.clear();
+    for (const [camera, cached] of cachedFrames) {
+      if (cached.frame.clock_domain !== current.clock_domain)
+        cachedFrames.delete(camera);
+    }
     emit("robot.connected", {
       backend: current.backend,
       boot_id: current.boot_id,
@@ -114,15 +159,10 @@ export async function sample() {
   }
 }
 export function freshObservation() {
-  if (
-    !current ||
-    Date.now() - receivedAt > 500 ||
-    current.age_ms > 250 ||
-    robotError
-  ) {
+  const elapsed = Math.max(0, performance.now() - observationReceived);
+  if (!current || current.age_ms + elapsed > 250 || robotError) {
     throw new ApiError("Robot observation is stale or unavailable", 503);
   }
-  const elapsed = Date.now() - receivedAt;
   return {
     ...current,
     age_ms: current.age_ms + elapsed,

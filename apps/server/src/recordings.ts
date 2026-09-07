@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { AppEvent } from "@robo/domain";
 
 import { config } from "./config";
-import { freshObservation, currentFrames, clock, ApiError } from "./robot";
+import { freshObservation, frames, clock, ApiError } from "./robot";
 import { db, emit } from "./store";
 
 export interface Recording {
@@ -117,6 +117,7 @@ export async function recordSample() {
       throw new Error("Recording stopped: storage reserve reached");
     }
     const images: Record<string, unknown> = {};
+    const currentFrames = frames();
     for (const name of ["workspace", "wrist"]) {
       const frame = currentFrames[name];
       if (!frame || frame.age_ms > 500) {

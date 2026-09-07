@@ -191,7 +191,7 @@ async function handle(req: Request): Promise<Response> {
     return json({
       observation: robot.current,
       received_at: robot.receivedAt,
-      frames: robot.currentFrames,
+      frames: robot.frames(),
       clock: robot.clock,
       events: events(parseCursor(url.searchParams.get("after")), 200),
       recording: recording.active,
@@ -522,7 +522,13 @@ export class App extends Context.Service<App, { readonly port: number }>()(
           })
       );
       yield* Effect.acquireRelease(
-        Effect.sync(() => setInterval(sampleTick, 100)),
+        Effect.sync(() =>
+          setInterval(() => {
+            sampleTick();
+            void robot.sampleCamera("workspace");
+            void robot.sampleCamera("wrist");
+          }, 100)
+        ),
         (timer) => Effect.sync(() => clearInterval(timer))
       );
       yield* Effect.acquireRelease(

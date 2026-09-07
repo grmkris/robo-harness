@@ -5,7 +5,7 @@ Robo Harness has three processes and one wire contract between them.
 ## Processes
 
 - **Python motor owner** (`python/robo_harness`, `robo-io`). A FastAPI service on the Pi. One daemon thread is the single writer to the motors, under one lock, at 30 Hz. It owns the driver (mock or LeRobot/Feetech), the cameras (through the so101-lab `lab_cameras` owner), control leases, bounded moves, measured completion, idempotent request IDs, and fault latching. Camera JPEG encoding runs in per-camera threads, never on the motor loop.
-- **TypeScript coordinator** (`apps/server`, `robo-app`). A Bun HTTP server. It polls the motor owner at 10 Hz, holds the latest observation and per-owner lease state, authenticates callers, runs the agent chat loop over the Vercel AI SDK, records sessions to SQLite and disk, proxies the Rerun viewer, and serves the built workbench. It never touches the motors directly; every motion goes through the Python service.
+- **TypeScript coordinator** (`apps/server`, `robo-app`). A Bun HTTP server. It polls the motor owner and each camera independently at 10 Hz, holds the latest observation and per-owner lease state, authenticates callers, runs the agent chat loop over the Vercel AI SDK, records sessions to SQLite and disk, proxies the Rerun viewer, and serves the built workbench. It never touches the motors directly; every motion goes through the Python service.
 - **Rerun telemetry worker** (`python/robo_harness/telemetry.py`, `robo-rerun`). A separate process that spawns the Rerun viewer bound to loopback and polls the coordinator's telemetry endpoint. It is off the motor loop by construction.
 
 The React/Vite workbench (`apps/web`) is a client of the coordinator only.
@@ -21,3 +21,5 @@ Tailscale access is the default; human trust comes from the peer address, not a 
 ## Direction
 
 The TypeScript side is converging on the house style used across `~/code`: Effect 4 for lifecycle, configuration, typed errors and boundaries, Effect Schema in place of Zod, and an `apps/*` + `packages/*` workspace layout with an enforced import graph. Decisions are recorded in `docs/decisions/`.
+
+Observation and frame freshness includes a conservative full HTTP round-trip bound plus elapsed local monotonic time. A camera request never blocks the observation sampler or the other camera; each camera has at most one request in flight. Recordings and telemetry read aged frame snapshots, and a robot boot change discards frames from another clock domain.
