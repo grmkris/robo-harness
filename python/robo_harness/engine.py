@@ -142,12 +142,14 @@ class Engine:
         with self.lock:
             key = (owner, request_id)
             signature = (target, xyz, duration_s)
+            # A replay is only honoured under a live lease, so an expired
+            # controller cannot re-trigger a stored motion.
+            self._check_lease(lease_id, owner)
             if key in self.operations:
                 old = self.operations[key]
                 if old["_signature"] != signature:
                     raise ControlError("Request ID was reused with different motion")
                 return self._public(old)
-            self._check_lease(lease_id, owner)
             if self.lease["mode"] == "leader":
                 raise ControlError("Leader teleoperation owns motion")
             if not request_id or len(request_id) > 128:
@@ -206,7 +208,16 @@ class Engine:
             if any(abs(self.measured[j] - start[j]) > 0.5 for j in JOINTS):
                 raise ControlError("Robot moved while planning; observe and replan")
             if len(self.operations) >= 10000:
-                raise ControlError("Operation ledger is full; start a new reviewed service session")
+                # Evict the oldest finished operations, never the active one.
+                for old_key in list(self.operations):
+                    if len(self.operations) < 10000:
+                        break
+                    entry = self.operations[old_key]
+                    if entry is not self.operation and entry["status"] not in (
+                        "accepted",
+                        "running",
+                    ):
+                        del self.operations[old_key]
             self.operation = {
                 "id": str(uuid.uuid4()),
                 "request_id": request_id,

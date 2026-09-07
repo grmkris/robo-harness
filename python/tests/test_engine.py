@@ -220,3 +220,34 @@ def test_agent_cannot_acquire_without_camera_observation(rig):
         e.acquire("a")
     assert e.lease is None
     assert e.acquire("operator", mode="human")["mode"] == "human"
+
+
+def test_replay_without_lease_is_rejected(rig):
+    e, c = rig
+    lease = e.acquire("agent")
+    e.submit("r", lease["lease_id"], "agent", target={"gripper": 42}, duration_s=1)
+    # The lease (3 s) expires and is revoked as the clock advances.
+    advance(e, c, 4)
+    with pytest.raises(ControlError):
+        e.submit("r", lease["lease_id"], "agent", target={"gripper": 42}, duration_s=1)
+
+
+def test_ledger_evicts_finished_operations_and_keeps_active(rig):
+    e, c = rig
+    lease = e.acquire("agent")
+    for i in range(10000):
+        e.operations[("agent", f"old{i}")] = {
+            "id": f"o{i}",
+            "status": "completed",
+            "_signature": (None, None, 1),
+            "request_id": f"old{i}",
+            "owner": "agent",
+            "target": {},
+            "residual": None,
+        }
+    assert len(e.operations) == 10000
+    op = e.submit("fresh", lease["lease_id"], "agent", target={"gripper": 46}, duration_s=1)
+    assert op["status"] == "accepted"
+    assert len(e.operations) <= 10000
+    # The freshly accepted (active) operation is retained, not evicted.
+    assert ("agent", "fresh") in e.operations
