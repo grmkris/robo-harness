@@ -8,17 +8,17 @@ import {
 } from "../src/server/access";
 
 describe("trustedSource", () => {
-  const trust = { loopback: false, blocked: new Set(["100.77.154.45"]) };
+  const trust = { loopback: false, blocked: new Set(["100.100.0.9"]) };
   test("accepts tailnet peers only", () => {
-    expect(trustedSource("100.105.51.45", trust)).toBe(true);
-    expect(trustedSource("::ffff:100.105.51.46", trust)).toBe(true);
+    expect(trustedSource("100.100.0.1", trust)).toBe(true);
+    expect(trustedSource("::ffff:100.100.0.2", trust)).toBe(true);
     expect(trustedSource("fd7a:115c:a1e0::1", trust)).toBe(true);
     expect(trustedSource("172.17.0.2", trust)).toBe(false);
     expect(trustedSource("10.0.0.7", trust)).toBe(false);
     expect(trustedSource("", trust)).toBe(false);
   });
   test("never trusts the robot host and trusts loopback only when bound there", () => {
-    expect(trustedSource("100.77.154.45", trust)).toBe(false);
+    expect(trustedSource("100.100.0.9", trust)).toBe(false);
     expect(trustedSource("127.0.0.1", trust)).toBe(false);
     expect(
       trustedSource("::ffff:127.0.0.1", { ...trust, loopback: true })

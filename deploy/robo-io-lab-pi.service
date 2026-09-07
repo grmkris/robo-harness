@@ -4,6 +4,7 @@ After=network-online.target tailscaled.service
 Wants=network-online.target
 Conflicts=labcam-preview.service
 
+# ROBO_IO_HOST (the Pi's tailnet bind address) is set in var/io.env.
 [Service]
 Type=simple
 User=kris
@@ -12,7 +13,7 @@ Environment=PYTHONPATH=/home/kris/robo-harness/python
 Environment=OPENBLAS_NUM_THREADS=1
 Environment=OMP_NUM_THREADS=1
 EnvironmentFile=/home/kris/robo-harness/var/io.env
-ExecStart=/home/kris/robo-harness/.venv/bin/python -m robo_harness.service --profile config/robot.lab-pi.json --host 100.77.154.45
+ExecStart=/home/kris/robo-harness/.venv/bin/python -m robo_harness.service --profile config/robot.lab-pi.json --host ${ROBO_IO_HOST}
 Restart=no
 TimeoutStopSec=12
 UMask=0077

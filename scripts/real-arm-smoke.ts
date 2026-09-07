@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const url = process.env["ROBO_URL"] ?? "http://100.105.51.45:8940";
+const url = process.env["ROBO_URL"] ?? "http://127.0.0.1:8940";
 const folder = `${root}/var/real-arm-acceptance`;
 await mkdir(folder, { recursive: true });
 const client = new Client({ name: "real-arm-acceptance", version: "1.0.0" });

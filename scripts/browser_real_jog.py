@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-base = "http://100.105.51.45:8940"
+base = os.environ.get("ROBO_URL", "http://127.0.0.1:8940")
 env = {**os.environ, "NODE_OPTIONS": "--import=" + str(root / "scripts/expect-local.mjs")}
 report = {}
 

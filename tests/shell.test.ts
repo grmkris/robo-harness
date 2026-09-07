@@ -8,7 +8,7 @@ const base = {
   image: "robo-harness-dev:local",
   uid: 1000,
   gid: 1000,
-  programUrl: "http://100.105.51.45:8940",
+  programUrl: "http://100.100.0.1:8940",
   token: "program-token",
 };
 describe("dockerArguments", () => {
@@ -26,7 +26,7 @@ describe("dockerArguments", () => {
     ]) {
       expect(args).toContain(flag);
     }
-    expect(args).toContain("ROBO_URL=http://100.105.51.45:8940");
+    expect(args).toContain("ROBO_URL=http://100.100.0.1:8940");
     expect(args).toContain("ROBO_TOKEN=program-token");
     expect(args.at(-3)).toBe("robo-harness-dev:local");
   });

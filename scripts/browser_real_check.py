@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = {**os.environ, "NODE_OPTIONS": "--import=" + str(ROOT / "scripts/expect-local.mjs")}
-BASE = "http://100.105.51.45:8940"
+BASE = os.environ.get("ROBO_URL", "http://127.0.0.1:8940")
 
 
 def browser(code, label):

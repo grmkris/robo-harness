@@ -4,13 +4,14 @@ After=network-online.target
 Wants=network-online.target
 Conflicts=labcam-preview.service
 
+# ROBO_IO_HOST (the Pi's tailnet bind address) is set in /etc/robo-harness/io.env.
 [Service]
 Type=simple
 User=robo-io
 SupplementaryGroups=dialout video
 WorkingDirectory=/opt/robo-harness/current
 EnvironmentFile=/etc/robo-harness/io.env
-ExecStart=/opt/robo-harness/venv/bin/robo-io --profile /etc/robo-harness/robot.json --host 100.77.154.45 --port 8941
+ExecStart=/opt/robo-harness/venv/bin/robo-io --profile /etc/robo-harness/robot.json --host ${ROBO_IO_HOST} --port 8941
 Restart=no
 TimeoutStopSec=10
 NoNewPrivileges=yes

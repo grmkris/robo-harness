@@ -4,7 +4,7 @@
       "command": "/home/kristjan/.bun/bin/bun",
       "args": ["/home/kristjan/code/robo-harness-deploy/src/mcp.ts"],
       "env": {
-        "ROBO_URL": "http://100.105.51.45:8940",
+        "ROBO_URL": "http://127.0.0.1:8940",
         "ROBO_CONTROLLER": "my-robot-agent"
       }
     }
