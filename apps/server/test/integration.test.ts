@@ -273,6 +273,12 @@ describe("mock HTTP integration", () => {
       id: string;
     }[];
     expect(history.some((c) => c.id === session.session_id)).toBe(true);
+    // The model saw the image (image_url above), but the stored transcript must
+    // not carry the base64 payload.
+    const convo = await (
+      await request(`/api/conversations/${session.session_id}`)
+    ).json();
+    expect(JSON.stringify(convo).includes("base64,")).toBe(false);
   });
   test("a malformed event cursor replays from the beginning", async () => {
     const page = async (after: string) =>

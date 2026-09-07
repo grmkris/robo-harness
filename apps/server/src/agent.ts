@@ -75,27 +75,51 @@ function safe(value: unknown): unknown {
   return value;
 }
 export async function startChat(provider: string, text: string, id?: string) {
-  const resolved = await resolveModel(provider);
   const sessionId = id ?? crypto.randomUUID();
+  // Reserve the session synchronously, before any await, so two concurrent
+  // starts on the same id cannot both pass the guard.
   if (sessions.has(sessionId)) {
     throw new ApiError("Conversation is already running; steer or cancel it");
   }
-  const existing = db
-    .query("SELECT provider FROM conversations WHERE id=?")
-    .get(sessionId) as { provider: string } | null;
-  if (existing && existing.provider !== provider) {
-    throw new ApiError("Start a new conversation to change provider");
-  }
-  db.query(
-    "INSERT OR IGNORE INTO conversations(id,provider,model,created) VALUES(?,?,?,?)"
-  ).run(sessionId, provider, resolved.info.model, Date.now());
   const state = { abort: new AbortController(), inbox: [] as string[] };
   sessions.set(sessionId, state);
+  let resolved: Awaited<ReturnType<typeof resolveModel>>;
+  try {
+    resolved = await resolveModel(provider);
+    const existing = db
+      .query("SELECT provider FROM conversations WHERE id=?")
+      .get(sessionId) as { provider: string } | null;
+    if (existing && existing.provider !== provider) {
+      throw new ApiError("Start a new conversation to change provider");
+    }
+    db.query(
+      "INSERT OR IGNORE INTO conversations(id,provider,model,created) VALUES(?,?,?,?)"
+    ).run(sessionId, provider, resolved.info.model, Date.now());
+  } catch (error) {
+    sessions.delete(sessionId);
+    throw error;
+  }
   const owner = `chat-${sessionId}`;
+  // Images stay in the live message array for the model but never in the stored
+  // transcript, which would otherwise grow by megabytes per captured frame.
+  const withoutImages = (list: ModelMessage[]) =>
+    list.map((message) => {
+      if (!Array.isArray(message.content)) {
+        return message;
+      }
+      return {
+        ...message,
+        content: message.content.map((part) =>
+          part.type === "image"
+            ? { type: "text" as const, text: "[camera frame]" }
+            : part
+        ),
+      };
+    });
   const persist = (messages: ModelMessage[]) =>
     db
       .query("UPDATE conversations SET messages=? WHERE id=?")
-      .run(JSON.stringify(messages), sessionId);
+      .run(JSON.stringify(withoutImages(messages)), sessionId);
   let messages: ModelMessage[] = history(sessionId);
   messages.push({ role: "user", content: text });
   persist(messages);
