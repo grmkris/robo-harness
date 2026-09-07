@@ -4,6 +4,7 @@ import argparse
 import hmac
 import json
 import os
+import socket
 import threading
 import time
 import uuid
@@ -173,12 +174,19 @@ def main():
     profile = json.loads(Path(args.profile).read_text())
     if profile["backend"] not in ("mock", "so101"):
         parser.error("Unknown backend")
-    uvicorn.run(
-        create_app(profile, os.environ.get("ROBO_IO_TOKEN", "")),
-        host=args.host,
-        port=args.port,
-        access_log=False,
+    app = create_app(profile, os.environ.get("ROBO_IO_TOKEN", ""))
+    # Bind the socket here so port 0 can be resolved to a real port and announced
+    # on stdout; tests read the line instead of guessing a fixed port.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((args.host, args.port))
+    bound_host, bound_port = sock.getsockname()[:2]
+    print(
+        json.dumps({"event": "listening", "host": bound_host, "port": bound_port}),
+        flush=True,
     )
+    config = uvicorn.Config(app, access_log=False, log_level="info")
+    uvicorn.Server(config).run(sockets=[sock])
 
 
 if __name__ == "__main__":
