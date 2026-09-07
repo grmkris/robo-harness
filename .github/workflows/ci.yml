@@ -28,19 +28,21 @@ jobs:
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      # The Bun integration tests spawn the Python I/O service, so its virtual
+      # environment must exist before the check ladder runs.
+      - name: Sync Python dev environment
+        run: uv sync --extra dev
+
       - name: Run the check ladder
         run: bun run check
 
       - name: Build the workbench
         run: bun run build
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-
-      - name: Sync Python dev environment
-        run: uv sync --extra dev
-
-      - name: Python lint, format and tests
+      - name: Python lint and tests
         run: |
           uv run ruff check --config pyproject.toml python
           uv run --extra dev pytest -q
