@@ -1,0 +1,46 @@
+name: CI
+
+# Public repository: GitHub-hosted runner (free minutes on public repos), and
+# push-to-main only so a fork's pull request never runs untrusted code here.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run the check ladder
+        run: bun run check
+
+      - name: Build the workbench
+        run: bun run build
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Sync Python dev environment
+        run: uv sync --extra dev
+
+      - name: Python lint, format and tests
+        run: |
+          uv run ruff check --config pyproject.toml python
+          uv run --extra dev pytest -q
