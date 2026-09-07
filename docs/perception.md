@@ -19,7 +19,7 @@ Set ROBO_PERCEPTION_TOKEN on the worker and the matching value on the coordinato
 
 For fal, configure ROBO_FAL_ENDPOINT as an endpoint implementing this contract (for example, a hosted wrapper around the same model code). Arbitrary catalog endpoints have different input/output shapes and require a matching adapter; the app does not silently guess their schemas. The fal queue adapter validates returned job URLs, polls boundedly, and requests cancellation on timeout.
 
-ROBO_PERCEPTION_COST_USD must be a conservative maximum per inference request. The operator approves an aggregate limit in Activity. Each request reserves that amount atomically before submission, including requests whose billing outcome becomes uncertain. The UI calls it reserved spending; reconcile with provider billing before adjusting estimates.
+ROBO_PERCEPTION_COST_USD must be a conservative maximum per inference request. The operator approves an aggregate limit in Activity. Each request reserves that amount atomically before submission, including requests whose billing outcome becomes uncertain. A request rejected before submission or with an explicit client-rejection response can refund the reservation. Lost responses, timeouts, and server errors retain it because the provider may already have accepted or executed the work. The failure event records `reservation_retained`. The UI calls it reserved spending; reconcile with provider billing before adjusting estimates.
 
 The app does not create persistent GPU pods automatically. Operator-provisioned pods remain the operator's responsibility to stop. RunPod serverless jobs can use the same worker contract through a deployment wrapper.
 

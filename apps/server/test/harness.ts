@@ -236,8 +236,8 @@ function startFixture(
           prompt: string;
           frame: { id: string; width: number; height: number };
         };
-        if (payload.prompt === "fail") {
-          return new Response("worker down", { status: 500 });
+        if (payload.prompt === "reject") {
+          return new Response("invalid inference request", { status: 422 });
         }
         return Response.json({
           kind: payload.kind,

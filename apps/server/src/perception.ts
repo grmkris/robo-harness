@@ -6,6 +6,12 @@ import { config } from "./config";
 import { capture, ApiError } from "./robot";
 import { db, emit } from "./store";
 
+// These responses reject a submission before inference. Transport failures,
+// timeouts and server errors do not establish whether work was accepted.
+const REJECTED_SUBMISSION_STATUSES = new Set([
+  400, 401, 403, 404, 405, 413, 415, 422, 429,
+]);
+
 const Pixels = Schema.Int.check(
   Schema.isGreaterThan(0),
   Schema.isLessThanOrEqualTo(4096)
@@ -103,11 +109,30 @@ export async function perceive(
     signal ?? new AbortController().signal,
     AbortSignal.timeout(120_000),
   ]);
-  // The reservation is refunded unless a paid backend accepted the job; after
-  // that point the charge stands even if the answer is rejected.
-  let charged = false;
+  // Reserve from the moment submission can reach the provider. Losing the
+  // acknowledgement must not free budget that may already have been spent.
+  let keepReservation = false;
+  const submit = async (url: string, headers: Record<string, string>) => {
+    const body = JSON.stringify({
+      kind: input.kind,
+      prompt: input.prompt,
+      frame,
+    });
+    const destination = new URL(url);
+    combined.throwIfAborted();
+    keepReservation = true;
+    const response = await fetch(destination, {
+      method: "POST",
+      headers,
+      body,
+      signal: combined,
+    });
+    if (REJECTED_SUBMISSION_STATUSES.has(response.status)) {
+      keepReservation = false;
+    }
+    return response;
+  };
   try {
-    const body = { kind: input.kind, prompt: input.prompt, frame };
     let raw: unknown;
     if (process.env["ROBO_FAL_ENDPOINT"]) {
       const endpoint = process.env["ROBO_FAL_ENDPOINT"];
@@ -118,16 +143,10 @@ export async function perceive(
         Authorization: `Key ${process.env["FAL_KEY"]}`,
         "Content-Type": "application/json",
       };
-      const queued = await fetch(`https://queue.fal.run/${endpoint}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: combined,
-      });
+      const queued = await submit(`https://queue.fal.run/${endpoint}`, headers);
       if (!queued.ok) {
         throw new Error("fal rejected the inference request");
       }
-      charged = true;
       const job = (await queued.json()) as {
         status_url: string;
         response_url: string;
@@ -179,16 +198,11 @@ export async function perceive(
         throw error;
       }
     } else {
-      const response = await fetch(
+      const response = await submit(
         `${process.env["ROBO_PERCEPTION_URL"]!}/infer`,
         {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env["ROBO_PERCEPTION_TOKEN"]}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-          signal: combined,
+          Authorization: `Bearer ${process.env["ROBO_PERCEPTION_TOKEN"]}`,
+          "Content-Type": "application/json",
         }
       );
       if (!response.ok) {
@@ -196,7 +210,6 @@ export async function perceive(
           "Perception worker failed with status " + response.status
         );
       }
-      charged = true;
       raw = await response.json();
     }
     const result = Schema.decodeUnknownSync(resultSchema)(raw);
@@ -232,7 +245,7 @@ export async function perceive(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Perception failed";
-    if (!charged) {
+    if (!keepReservation) {
       db.query(
         "UPDATE budgets SET spent_usd=MAX(0,spent_usd-?) WHERE id=1"
       ).run(settings.cost_usd);
@@ -241,7 +254,11 @@ export async function perceive(
       message,
       id
     );
-    emit("perception.failed", { id, message });
+    emit("perception.failed", {
+      id,
+      message,
+      reservation_retained: keepReservation,
+    });
     throw new ApiError(message, 502);
   }
 }
