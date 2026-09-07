@@ -1,8 +1,9 @@
 import { resolve, sep } from "node:path";
 
+import { BunRuntime } from "@effect/platform-bun";
 import { toolSchemas } from "@robo/protocol";
 import type { ToolName } from "@robo/protocol";
-import { Schema } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 
 import { equal, parseCursor, trustedSource } from "./access";
 import * as agent from "./agent";
@@ -123,7 +124,6 @@ export function sweep(now = Date.now()) {
   }
   sweepCapabilities(now);
 }
-const sweeper = setInterval(sweep, 60_000);
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
@@ -456,26 +456,30 @@ async function handle(req: Request): Promise<Response> {
         { status: 503 }
       );
 }
-export const server = Bun.serve({
+// Assigned when the App layer acquires the server; handlers read it only at
+// request time, after startup.
+let server: ReturnType<typeof Bun.serve>;
+const serveOptions = {
   hostname: config.host,
   port: config.port,
   idleTimeout: 60,
   maxRequestBodySize: 65_536,
-  async fetch(req) {
+  async fetch(req: Request): Promise<Response> {
     try {
       return await handle(req);
     } catch (error) {
-      if (error instanceof robot.ApiError)
+      if (error instanceof robot.ApiError) {
         return json({ error: error.message }, error.status);
+      }
       return json(
         { error: "Service request failed; check component status" },
         502
       );
     }
   },
-});
+} as const;
 let sampling = false;
-const sampler = setInterval(() => {
+function sampleTick(): void {
   if (sampling) {
     recording.noteMissedSample();
     return;
@@ -493,41 +497,73 @@ const sampler = setInterval(() => {
     .finally(() => {
       sampling = false;
     });
-}, 100);
-subscribe((event) => {
-  void recording.recordEvent(event).catch(() => {});
-});
-const address = `http://${config.host}:${server.port}`;
-console.log(`Robo Harness listening on ${address}`);
-// Machine-readable line so a test harness can read the resolved port when
-// ROBO_PORT is 0, instead of racing a fixed port.
-console.log(
-  JSON.stringify({ event: "listening", host: config.host, port: server.port })
-);
-console.log(
-  config.accessMode === "tailnet"
-    ? "Tailscale access enabled; no operator login."
-    : `Operator token is stored in ${
-        config.dataDir
-      }/operator-token (not printed).`
-);
-async function shutdown() {
-  clearInterval(sampler);
-  clearInterval(sweeper);
-  await robot.stop().catch(() => {});
-  if (recording.active) {
-    await recording.stopRecording().catch(() => {});
-  }
-  for (const id of agent.running()) {
-    agent.cancel(id);
-  }
-  server.stop(true);
-  db.close();
-  process.exit(0);
 }
-process.on("SIGTERM", () => {
-  void shutdown();
-});
-process.on("SIGINT", () => {
-  void shutdown();
-});
+
+// Effect owns the process lifecycle. Finalizers run in reverse of acquisition,
+// so motion is stopped first and the database is closed last.
+export class App extends Context.Service<App, { readonly port: number }>()(
+  "robo-harness/server/App"
+) {
+  static readonly layer = Layer.effect(
+    App,
+    Effect.gen(function* start() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => db.close()));
+      server = yield* Effect.acquireRelease(
+        Effect.sync(() => Bun.serve(serveOptions)),
+        (running) =>
+          Effect.promise(async () => {
+            await running.stop(true);
+          })
+      );
+      yield* Effect.acquireRelease(
+        Effect.sync(() => setInterval(sampleTick, 100)),
+        (timer) => Effect.sync(() => clearInterval(timer))
+      );
+      yield* Effect.acquireRelease(
+        Effect.sync(() => setInterval(sweep, 60_000)),
+        (timer) => Effect.sync(() => clearInterval(timer))
+      );
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          subscribe((event) => {
+            void recording.recordEvent(event).catch(() => {});
+          })
+        ),
+        (off) => Effect.sync(off)
+      );
+      // Runs first on shutdown: stop motion, cancel agents, finalise a recording.
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          for (const id of agent.running()) {
+            agent.cancel(id);
+          }
+          await robot.stop().catch(() => {});
+          if (recording.active) {
+            await recording.stopRecording().catch(() => {});
+          }
+        })
+      );
+      console.log(
+        `Robo Harness listening on http://${config.host}:${server.port}`
+      );
+      // Machine-readable line so a test harness can read the resolved port.
+      console.log(
+        JSON.stringify({
+          event: "listening",
+          host: config.host,
+          port: server.port,
+        })
+      );
+      console.log(
+        config.accessMode === "tailnet"
+          ? "Tailscale access enabled; no operator login."
+          : `Operator token is stored in ${config.dataDir}/operator-token (not printed).`
+      );
+      return App.of({ port: server.port ?? config.port });
+    })
+  );
+}
+
+if (import.meta.main) {
+  BunRuntime.runMain(Layer.launch(App.layer));
+}
