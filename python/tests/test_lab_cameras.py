@@ -74,3 +74,80 @@ def test_motor_startup_failure_releases_camera_ownership(monkeypatch):
         with TestClient(create_app({"backend": "so101", "urdf": "unused"}, "a-test-credential-long-enough")):
             pass
     assert events == ["closed"]
+
+
+def test_device_camera_read_failure_recovers(monkeypatch):
+    """A read failure in `devices` mode must not kill the capture thread: it
+    drops the handle, reopens, and resumes producing frames."""
+    import threading
+    from collections import OrderedDict
+
+    mjpg = ord("M") | (ord("J") << 8) | (ord("P") << 16) | (ord("G") << 24)
+    reads = {"n": 0}
+    opened = []
+
+    class FakeCap:
+        def __init__(self):
+            self.released = False
+
+        def set(self, *args):
+            return True
+
+        def get(self, prop):
+            return mjpg
+
+        def isOpened(self):
+            return True
+
+        def read(self):
+            reads["n"] += 1
+            if reads["n"] <= 2:  # first two reads fail, then it recovers
+                return (False, None)
+            return (True, np.zeros((4, 4, 3), dtype=np.uint8))
+
+        def release(self):
+            self.released = True
+
+    def video_capture(dev, backend):
+        cap = FakeCap()
+        opened.append(cap)
+        return cap
+
+    fake_cv2 = SimpleNamespace(
+        VideoCapture=video_capture,
+        VideoWriter_fourcc=lambda *cc: mjpg,
+        cvtColor=lambda bgr, code: bgr,
+        CAP_V4L2=0,
+        CAP_PROP_FOURCC=0,
+        CAP_PROP_FRAME_WIDTH=0,
+        CAP_PROP_FRAME_HEIGHT=0,
+        CAP_PROP_FPS=0,
+        COLOR_BGR2RGB=0,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+
+    # Build a Cameras without __init__, so no flock/lock file or auto threads.
+    cams = Cameras.__new__(Cameras)
+    cams.profile = {"camera_mode": "devices", "camera_devices": {"workspace": "/dev/cam"}}
+    cams.domain = "boot"
+    cams.lock = threading.Lock()
+    cams.frames, cams.history, cams.errors = {}, OrderedDict(), {}
+    cams.closed = threading.Event()
+    cams.seq = {"workspace": 0}
+    cams.owner = None
+
+    worker = threading.Thread(target=cams._capture, args=("workspace",), daemon=True)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 8
+        while cams.seq["workspace"] == 0:
+            assert time.monotonic() < deadline, f"never recovered: {cams.errors}"
+            time.sleep(0.05)
+    finally:
+        cams.closed.set()
+        worker.join(timeout=3)
+
+    assert reads["n"] >= 3, "should have retried past the failing reads"
+    assert len(opened) >= 2, "should have reopened the device after a read failure"
+    assert cams.get("workspace")["camera"] == "workspace"
+    assert "workspace" not in cams.errors  # cleared once a frame succeeded

@@ -70,32 +70,63 @@ class Cameras:
                     self.errors[name] = str(e)
                 self.closed.wait(0.1)
 
+    def _open_device(self, name):
+        import cv2
+
+        cap = cv2.VideoCapture(self.profile["camera_devices"][name], cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        if not cap.isOpened():
+            cap.release()
+            raise RuntimeError("Camera device could not be opened")
+        # so101-lab rule: the device must actually deliver MJPG. A camera that
+        # silently fell back to raw YUYV blows the USB bandwidth budget and
+        # starves the other camera; refuse it rather than stream degraded.
+        fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+        got = bytes((fourcc >> (8 * i)) & 0xFF for i in range(4)).decode("ascii", "replace")
+        if got != "MJPG":
+            cap.release()
+            raise RuntimeError(f"Camera did not accept MJPG (reported {got!r})")
+        return cap
+
     def _capture(self, name):
         if self.owner is not None:
             self._capture_lab(name)
             return
         cap = None
+        mode = self.profile["camera_mode"]
+        if mode not in ("devices", "mock"):
+            with self.lock:
+                self.errors[name] = "Unknown camera mode"
+            return
         try:
-            if self.profile["camera_mode"] == "devices":
-                import cv2
-
-                cap = cv2.VideoCapture(self.profile["camera_devices"][name], cv2.CAP_V4L2)
-                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                cap.set(cv2.CAP_PROP_FPS, 30)
-                if not cap.isOpened():
-                    raise RuntimeError("Camera device could not be opened")
-            elif self.profile["camera_mode"] != "mock":
-                raise RuntimeError("Unknown camera mode")
             while not self.closed.is_set():
-                if cap:
+                if mode == "devices":
+                    if cap is None:
+                        try:
+                            cap = self._open_device(name)
+                        except Exception as e:
+                            # A device that will not open is recoverable: record
+                            # it and retry, rather than ending the thread.
+                            with self.lock:
+                                self.errors[name] = str(e)
+                            self.closed.wait(1.0)
+                            continue
                     import cv2
 
                     ok, bgr = cap.read()
                     mono, wall = time.monotonic(), time.time() * 1000
                     if not ok:
-                        raise RuntimeError("Camera read failed")
+                        # A read failure is recoverable too: drop the handle and
+                        # reopen on the next pass instead of killing the thread.
+                        with self.lock:
+                            self.errors[name] = "Camera read failed; reopening"
+                        cap.release()
+                        cap = None
+                        self.closed.wait(0.5)
+                        continue
                     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
                     img = Image.fromarray(rgb)
                 else:
