@@ -1,9 +1,14 @@
 import type { Frame } from "@robo/domain";
-import { toolSchemas, type ToolName } from "@robo/protocol";
-import { tool, jsonSchema } from "ai";
+import {
+  std,
+  toolSchemas,
+  type MoveInput,
+  type ToolName,
+} from "@robo/protocol";
+import { tool } from "ai";
 import type { ToolSet } from "ai";
-import { z } from "zod";
 
+import { decode } from "./decode";
 import { perceive } from "./perception";
 import { startRecording, stopRecording } from "./recordings";
 import * as robot from "./robot";
@@ -41,7 +46,7 @@ export async function executeTool(
   signal?: AbortSignal
 ): Promise<unknown> {
   signal?.throwIfAborted();
-  const input = toolSchemas[name].parse(raw);
+  const input = decode(toolSchemas[name], raw);
   switch (name) {
     case "observe": {
       return robot.freshObservation();
@@ -60,7 +65,7 @@ export async function executeTool(
       return robot.release(p.owner);
     }
     case "move": {
-      return robot.move(p.owner, input as robot.MoveInput);
+      return robot.move(p.owner, input as MoveInput);
     }
     case "operation": {
       return robot.operation((input as { id: string }).id);
@@ -93,9 +98,7 @@ export function agentTools(
       name,
       tool({
         description: descriptions[name],
-        inputSchema: jsonSchema<Record<string, unknown>>(
-          z.toJSONSchema(toolSchemas[name], { io: "input" })
-        ),
+        inputSchema: std(toolSchemas[name]),
         execute: async (input: Record<string, unknown>) => {
           try {
             const output = await executeTool(name, input, p, signal);

@@ -1,44 +1,88 @@
-import { joints } from "@robo/domain";
-import { z } from "zod";
+import { joints, type Joint } from "@robo/domain";
+import { Effect, Schema } from "effect";
+
 export { callTool } from "./client";
-export const moveSchema = z
-  .object({
-    request_id: z.string().min(1).max(128),
-    target: z.partialRecord(z.enum(joints), z.number().finite()).optional(),
-    xyz: z
-      .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
-      .optional(),
-    duration_s: z.number().min(0.1).max(10).default(1),
-  })
-  .strict()
-  .refine(
-    (v) => (v.target === undefined) !== (v.xyz === undefined),
-    "Specify joints or Cartesian target"
-  );
+export { std } from "./std";
+
+const RequestId = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(128)
+);
+const Duration = Schema.Finite.check(
+  Schema.isBetween({ minimum: 0.1, maximum: 10 })
+).pipe(Schema.optional, Schema.withDecodingDefault(Effect.succeed(1)));
+const Angle = Schema.optionalKey(Schema.Finite);
+// Keys come from the domain joint list so a move target cannot drift from it.
+const PartialPose = Schema.Struct(
+  Object.fromEntries(joints.map((joint) => [joint, Angle])) as Record<
+    Joint,
+    typeof Angle
+  >
+);
+// A move is joints XOR a Cartesian target. A single object (both keys optional)
+// keeps the JSON Schema a plain object for MCP; the refine enforces exactly one,
+// and strict decoding (onExcessProperty: "error") rejects an injected field.
+const MoveBase = Schema.Struct({
+  request_id: RequestId,
+  target: Schema.optionalKey(PartialPose),
+  xyz: Schema.optionalKey(
+    Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite])
+  ),
+  duration_s: Duration,
+});
+export const moveSchema = MoveBase.pipe(
+  Schema.refine(
+    (v): v is typeof MoveBase.Type =>
+      (v.target === undefined) !== (v.xyz === undefined),
+    { message: "Specify joints or a Cartesian target, not both" }
+  )
+);
+export type MoveInput = typeof moveSchema.Type;
+
+const Camera = Schema.Literals(["workspace", "wrist"]);
 export const toolSchemas = {
-  observe: z.object({}),
-  capture: z.object({ camera: z.enum(["workspace", "wrist"]) }),
-  acquire: z.object({
-    mode: z.enum(["agent", "human", "leader"]).default("agent"),
-    takeover: z.boolean().default(false),
+  observe: Schema.Struct({}),
+  capture: Schema.Struct({ camera: Camera }),
+  acquire: Schema.Struct({
+    mode: Schema.Literals(["agent", "human", "leader"]).pipe(
+      Schema.optional,
+      Schema.withDecodingDefault(Effect.succeed("agent" as const))
+    ),
+    takeover: Schema.Boolean.pipe(
+      Schema.optional,
+      Schema.withDecodingDefault(Effect.succeed(false))
+    ),
   }),
-  release: z.object({}),
-  renew: z.object({}),
+  release: Schema.Struct({}),
+  renew: Schema.Struct({}),
   move: moveSchema,
-  operation: z.object({ id: z.string() }),
-  stop: z.object({}),
-  perceive: z.object({
-    camera: z.enum(["workspace", "wrist"]),
-    kind: z.enum(["segment", "depth"]),
-    prompt: z.string().max(200).default("object"),
-    frame_id: z.string().optional(),
+  operation: Schema.Struct({ id: Schema.String }),
+  stop: Schema.Struct({}),
+  perceive: Schema.Struct({
+    camera: Camera,
+    kind: Schema.Literals(["segment", "depth"]),
+    prompt: Schema.String.check(Schema.isMaxLength(200)).pipe(
+      Schema.optional,
+      Schema.withDecodingDefault(Effect.succeed("object"))
+    ),
+    frame_id: Schema.optionalKey(Schema.String),
   }),
-  recording_start: z.object({ label: z.string().min(1).max(120) }),
-  recording_stop: z.object({}),
-  shell: z.object({
-    command: z.string().min(1).max(16_000),
-    host: z.enum(["netcup", "pi"]).default("netcup"),
-    timeout_s: z.number().min(1).max(120).default(30),
+  recording_start: Schema.Struct({
+    label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+  }),
+  recording_stop: Schema.Struct({}),
+  shell: Schema.Struct({
+    command: Schema.String.check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(16_000)
+    ),
+    host: Schema.Literals(["netcup", "pi"]).pipe(
+      Schema.optional,
+      Schema.withDecodingDefault(Effect.succeed("netcup" as const))
+    ),
+    timeout_s: Schema.Finite.check(
+      Schema.isBetween({ minimum: 1, maximum: 120 })
+    ).pipe(Schema.optional, Schema.withDecodingDefault(Effect.succeed(30))),
   }),
 } as const;
 export type ToolName = keyof typeof toolSchemas;

@@ -7,6 +7,6 @@
     "@robo/domain": "workspace:*",
     "@robo/protocol": "workspace:*",
     "ai": "7.0.79",
-    "zod": "4.5.4"
+    "effect": "4.0.0-rc.112"
   }
 }

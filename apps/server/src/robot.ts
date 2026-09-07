@@ -1,11 +1,9 @@
 import type { Observation, Frame, Joint, Lease, Operation } from "@robo/domain";
-import type { moveSchema } from "@robo/protocol";
-import type { z } from "zod";
+import type { MoveInput } from "@robo/protocol";
 
 import { config } from "./config";
 import { emit } from "./store";
 
-export type MoveInput = z.infer<typeof moveSchema>;
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status = 409) {
@@ -192,7 +190,7 @@ export async function release(owner: string) {
 export async function move(owner: string, body: MoveInput) {
   refuseWhileStopping();
   const c = liveController(owner);
-  if (body.target) {
+  if (body.target !== undefined) {
     // The observation carries the commissioned limits; a target outside them is
     // refused before it reaches the motor owner, naming the joint.
     const { limits } = freshObservation();

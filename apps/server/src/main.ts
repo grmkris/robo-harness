@@ -2,12 +2,13 @@ import { resolve, sep } from "node:path";
 
 import { toolSchemas } from "@robo/protocol";
 import type { ToolName } from "@robo/protocol";
-import { z } from "zod";
+import { Schema } from "effect";
 
 import { equal, parseCursor, trustedSource } from "./access";
 import * as agent from "./agent";
 import { getCapability, sweepCapabilities } from "./capabilities";
 import { config } from "./config";
+import { decode, isUuid, Uuid } from "./decode";
 import { budget, setBudget, perceptionConfig } from "./perception";
 import { catalog } from "./providers";
 import * as recording from "./recordings";
@@ -139,9 +140,10 @@ async function handle(req: Request): Promise<Response> {
     if (attempts && attempts.until > Date.now() && attempts.count >= 10) {
       return json({ error: "Too many attempts; retry in a minute" }, 429);
     }
-    const body = z
-      .object({ token: z.string().max(200) })
-      .parse(await parse(req));
+    const body = decode(
+      Schema.Struct({ token: Schema.String.check(Schema.isMaxLength(200)) }),
+      await parse(req)
+    );
     if (!equal(body.token, config.token)) {
       failedLogins.set(key, {
         count:
@@ -169,14 +171,15 @@ async function handle(req: Request): Promise<Response> {
       return json({ error: "Unauthorized" }, 401);
     }
     if (path === "/api/telemetry/heartbeat" && req.method === "POST") {
-      const body = z
-        .object({
-          error: z.string().nullable(),
-          dropped: z.number().int().nonnegative(),
-          version: z.string(),
-          recording_id: z.string().nullable(),
-        })
-        .parse(await parse(req));
+      const body = decode(
+        Schema.Struct({
+          error: Schema.NullOr(Schema.String),
+          dropped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+          version: Schema.String,
+          recording_id: Schema.NullOr(Schema.String),
+        }),
+        await parse(req)
+      );
       telemetry = { ...body, at: Date.now() };
       return json({ ok: true });
     }
@@ -297,7 +300,10 @@ async function handle(req: Request): Promise<Response> {
     if (path === "/api/budget" && req.method === "POST") {
       requireHuman(principal);
       return json(
-        setBudget(z.object({ limit: z.number() }).parse(await parse(req)).limit)
+        setBudget(
+          decode(Schema.Struct({ limit: Schema.Finite }), await parse(req))
+            .limit
+        )
       );
     }
     if (path === "/api/conversations") {
@@ -305,7 +311,7 @@ async function handle(req: Request): Promise<Response> {
     }
     if (path.startsWith("/api/conversations/")) {
       const id = path.split("/").at(-1)!;
-      if (!z.string().uuid().safeParse(id).success) {
+      if (!isUuid(id)) {
         throw new robot.ApiError("Invalid conversation", 400);
       }
       const conversation = db
@@ -331,13 +337,17 @@ async function handle(req: Request): Promise<Response> {
     }
     if (path === "/api/chat" && req.method === "POST") {
       requireHuman(principal);
-      const body = z
-        .object({
-          provider: z.string(),
-          text: z.string().min(1).max(24_000),
-          session_id: z.string().uuid().optional(),
-        })
-        .parse(await parse(req));
+      const body = decode(
+        Schema.Struct({
+          provider: Schema.String,
+          text: Schema.String.check(
+            Schema.isMinLength(1),
+            Schema.isMaxLength(24_000)
+          ),
+          session_id: Schema.optionalKey(Uuid),
+        }),
+        await parse(req)
+      );
       return json(
         await agent.startChat(body.provider, body.text, body.session_id)
       );
@@ -345,14 +355,23 @@ async function handle(req: Request): Promise<Response> {
     if (path === "/api/chat/cancel" && req.method === "POST") {
       requireHuman(principal);
       return json(
-        agent.cancel(z.object({ id: z.string() }).parse(await parse(req)).id)
+        agent.cancel(
+          decode(Schema.Struct({ id: Schema.String }), await parse(req)).id
+        )
       );
     }
     if (path === "/api/chat/steer" && req.method === "POST") {
       requireHuman(principal);
-      const b = z
-        .object({ id: z.string(), text: z.string().min(1).max(4000) })
-        .parse(await parse(req));
+      const b = decode(
+        Schema.Struct({
+          id: Schema.String,
+          text: Schema.String.check(
+            Schema.isMinLength(1),
+            Schema.isMaxLength(4000)
+          ),
+        }),
+        await parse(req)
+      );
       agent.steer(b.id, b.text);
       return json({ ok: true });
     }
@@ -361,7 +380,7 @@ async function handle(req: Request): Promise<Response> {
     }
     if (path.startsWith("/api/recordings/") && path.endsWith("/replay.rrd")) {
       const id = path.split("/")[3];
-      if (!z.string().uuid().safeParse(id).success) {
+      if (!isUuid(id)) {
         return json({ error: "Invalid recording" }, 400);
       }
       const file = Bun.file(`${config.dataDir}/recordings/${id}/replay.rrd`);
@@ -377,7 +396,7 @@ async function handle(req: Request): Promise<Response> {
     }
     if (path.startsWith("/api/perception/")) {
       const id = path.split("/")[3];
-      if (!z.string().uuid().safeParse(id).success) {
+      if (!isUuid(id)) {
         return json({ error: "Invalid artifact" }, 400);
       }
       const file = Bun.file(`${config.dataDir}/perception/${id}/preview.png`);
@@ -446,17 +465,6 @@ export const server = Bun.serve({
     try {
       return await handle(req);
     } catch (error) {
-      if (error instanceof z.ZodError)
-        return json(
-          {
-            error: "Invalid request",
-            issues: error.issues.map((i) => ({
-              path: i.path,
-              message: i.message,
-            })),
-          },
-          400
-        );
       if (error instanceof robot.ApiError)
         return json({ error: error.message }, error.status);
       return json(

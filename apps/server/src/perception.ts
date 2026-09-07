@@ -1,33 +1,37 @@
 import { mkdir, writeFile } from "node:fs/promises";
 
-import { z } from "zod";
+import { Schema } from "effect";
 
 import { config } from "./config";
 import { capture, ApiError } from "./robot";
 import { db, emit } from "./store";
 
-const resultSchema = z.object({
-  kind: z.enum(["segment", "depth"]),
-  model: z.string(),
-  model_version: z.string(),
-  frame_id: z.string(),
-  width: z.number().int().positive().max(4096),
-  height: z.number().int().positive().max(4096),
-  preview_png: z.string(),
-  masks: z
-    .array(
-      z.object({
-        png: z.string(),
-        label: z.string(),
-        score: z.number().optional(),
+const Pixels = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(4096)
+);
+const resultSchema = Schema.Struct({
+  kind: Schema.Literals(["segment", "depth"]),
+  model: Schema.String,
+  model_version: Schema.String,
+  frame_id: Schema.String,
+  width: Pixels,
+  height: Pixels,
+  preview_png: Schema.String,
+  masks: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        png: Schema.String,
+        label: Schema.String,
+        score: Schema.optionalKey(Schema.Finite),
       })
     )
-    .optional(),
-  depth: z.array(z.array(z.number().finite()).max(2048)).max(2048).optional(),
-  depth_width: z.number().int().positive().optional(),
-  depth_height: z.number().int().positive().optional(),
-  depth_to_image: z.array(z.array(z.number().finite())).optional(),
-  units: z.enum(["relative", "meters", "pixels"]).optional(),
+  ),
+  depth: Schema.optionalKey(Schema.Array(Schema.Array(Schema.Finite))),
+  depth_width: Schema.optionalKey(Schema.Int),
+  depth_height: Schema.optionalKey(Schema.Int),
+  depth_to_image: Schema.optionalKey(Schema.Array(Schema.Array(Schema.Finite))),
+  units: Schema.optionalKey(Schema.Literals(["relative", "meters", "pixels"])),
 });
 export function budget() {
   return db
@@ -195,7 +199,7 @@ export async function perceive(
       charged = true;
       raw = await response.json();
     }
-    const result = resultSchema.parse(raw);
+    const result = Schema.decodeUnknownSync(resultSchema)(raw);
     if (result.frame_id !== frame.id || result.kind !== input.kind) {
       throw new Error(
         "Perception response does not match source frame or requested capability"

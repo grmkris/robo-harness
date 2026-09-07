@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "@robo/domain": "workspace:*",
-    "zod": "4.5.4"
+    "@standard-schema/spec": "1.1.0",
+    "effect": "4.0.0-rc.112"
   }
 }

@@ -65,7 +65,7 @@ export const nodes: readonly Node[] = [
     layer: "contract",
     role: "Robot value types shared across the coordinator, workbench and CLI.",
     mayImport: [],
-    mayUse: [],
+    mayUse: ["effect"],
   },
   {
     dir: "packages/protocol",
@@ -73,7 +73,7 @@ export const nodes: readonly Node[] = [
     layer: "contract",
     role: "Tool wire schemas and the typed HTTP client.",
     mayImport: ["@robo/domain"],
-    mayUse: ["zod"],
+    mayUse: ["effect", "@standard-schema/spec"],
   },
   {
     dir: "python",
