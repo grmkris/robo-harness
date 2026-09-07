@@ -274,11 +274,24 @@ class Engine:
     def _public(op: dict[str, Any]) -> dict[str, Any]:
         return copy.deepcopy({k: v for k, v in op.items() if not k.startswith("_")})
 
+    def _expire_control(self, deadline: float) -> None:
+        if not self.lease:
+            return
+        now = self.clock()
+        if self.lease["expires"] <= now:
+            reason = "Control lease expired"
+        elif now > deadline:
+            reason = "Control loop deadline missed"
+        else:
+            return
+        self._stop(reason)
+        self.lease = None
+
     def tick(self) -> None:
         with self.lock:
             now = self.clock()
             dt = min(max(now - self.last_tick, 0), 0.1)
-            gap = now - self.last_tick
+            deadline = self.last_tick + CONTROL_DEADLINE_S
             self.last_tick = now
             try:
                 self.measured = self.driver.read()
@@ -287,17 +300,15 @@ class Engine:
                 self.last_observed = now
                 self.last_wall_ms = time.time() * 1000
                 self.seq += 1
-                if gap > CONTROL_DEADLINE_S and self.lease:
-                    self._stop("Control loop deadline missed")
-                    self.lease = None
-                if self.lease and self.lease["expires"] <= now:
-                    self._stop("Control lease expired")
-                    self.lease = None
+                # Reads may block beyond the tick deadline or the lease. Never
+                # use the pre-read timestamp to authorize another motion command.
+                self._expire_control(deadline)
                 if self.lease and self.lease["mode"] == "agent" and not self.observation_guard():
                     self._stop("Camera observation is stale or unavailable")
                     self.lease = None
                 if self.fault:
                     return
+                proposed = self.commanded
                 if self.leader and self.lease:
                     target = self.leader.read()
                     if set(target) != set(JOINTS):
@@ -310,17 +321,26 @@ class Engine:
                         step = self.profile["max_speed"] * dt
                         proposed[j] = self.commanded[j] + max(-step, min(step, target[j] - self.commanded[j]))
                     self.kin.validate(proposed, self.profile)
-                    self.commanded = proposed
                 op = self.operation
+                now = self.clock()
                 if op and op["status"] in ("accepted", "running"):
-                    op["status"] = "running"
                     alpha = min(1.0, (now - op["_started"]) / op["duration_s"])
-                    self.commanded = {
+                    proposed = {
                         j: op["start"][j] + (op["target"][j] - op["start"][j]) * alpha for j in JOINTS
                     }
+                # Leader reads, camera guards and validation can also block.
+                # Commit a proposed target only after this final deadline check;
+                # an expired controller must keep the previous commanded hold.
+                self._expire_control(deadline)
+                if self.lease:
+                    self.commanded = proposed
+                if op and op["status"] in ("accepted", "running"):
+                    op["status"] = "running"
                     residual = {j: abs(self.measured[j] - op["target"][j]) for j in JOINTS}
                     op["residual"] = residual
-                    if alpha >= 1 and all(v <= (2 if j == "gripper" else 0.8) for j, v in residual.items()):
+                    if now >= op["_started"] + op["duration_s"] and all(
+                        v <= (2 if j == "gripper" else 0.8) for j, v in residual.items()
+                    ):
                         op.update(status="completed", finished_ms=time.time() * 1000)
                     elif now - op["_started"] > op["duration_s"] + 2:
                         op.update(

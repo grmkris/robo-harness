@@ -167,6 +167,72 @@ def test_deadline_miss_cancels_motion(rig):
     assert e.get_operation(op["id"])["status"] == "cancelled"
 
 
+@pytest.mark.parametrize(
+    ("delay", "remaining", "reason"),
+    [(0.3, 3, "deadline missed"), (3.1, 3, "lease expired"), (0.1, 0.05, "lease expired")],
+)
+def test_blocking_motor_read_never_advances_motion_after_deadline(rig, delay, remaining, reason):
+    e, clock = rig
+    lease = e.acquire("operator", "human")
+    op = e.submit("slow-read", lease["lease_id"], "operator", target={"shoulder_pan": 2})
+    e.lease["expires"] = clock() + remaining
+    held = e.commanded.copy()
+    read = e.driver.read
+
+    def slow_read():
+        clock.advance(delay)
+        return read()
+
+    e.driver.read = slow_read
+    clock.advance(1 / 30)
+    e.tick()
+
+    assert e.lease is None
+    assert e.get_operation(op["id"])["status"] == "cancelled"
+    assert reason in e.get_operation(op["id"])["reason"]
+    assert e.commanded == held
+    assert read() == held
+    assert e.fault is None
+
+
+@pytest.mark.parametrize("stage", ["leader_read", "validation"])
+@pytest.mark.parametrize(("delay", "remaining"), [(0.3, 3), (0.1, 0.05)])
+def test_blocking_leader_work_preserves_last_command(rig, stage, delay, remaining):
+    e, clock = rig
+    e.acquire("operator", "leader")
+    e.lease["expires"] = clock() + remaining
+    held = e.commanded.copy()
+    closed = []
+
+    class Leader:
+        def read(self):
+            if stage == "leader_read":
+                clock.advance(delay)
+            return {**held, "shoulder_pan": held["shoulder_pan"] + 1}
+
+        def close(self):
+            closed.append(True)
+
+    validate = e.kin.validate
+
+    def slow_validate(pose, profile):
+        if stage == "validation":
+            clock.advance(delay)
+        validate(pose, profile)
+
+    e.leader = Leader()
+    e.kin.validate = slow_validate
+    clock.advance(1 / 30)
+    e.tick()
+
+    assert e.lease is None
+    assert e.leader is None
+    assert closed == [True]
+    assert e.commanded == held
+    assert e.driver.read() == held
+    assert e.fault is None
+
+
 def test_stop_can_interrupt_planning_without_waiting_for_ik(rig):
     e, _ = rig
     lease = e.acquire("a")
