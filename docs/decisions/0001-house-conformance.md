@@ -17,3 +17,7 @@ Stay standalone: no runtime dependency on Invok or the archived harness. Keep th
 ## Consequences
 
 `oxlint.config.ts` carries a transitional block downgrading to `warn` the rules that only fire on code the migration rewrites; each returns to `error` as its files are rewritten. The workbench flake in the current fixed-port integration tests is accepted until the port-0, event-predicate harness replaces it.
+
+## Update (2026-09-07)
+
+The deploy worktree was removed at the user's direction. The lab now runs the systemd units directly from the `main` working tree; there are no git worktrees or branches. Real config and provider credentials live in `~/.config/robo-harness.env`, keeping the repo `.env` dev/mock.

@@ -16,7 +16,7 @@ The shared contract now lives in `packages/domain` (value types) and `packages/p
 
 ## Trust and deployment
 
-Tailscale access is the default; human trust comes from the peer address, not a header. Development shells run in a hardened bridge-network container with a short-lived capability token and no hardware or provider credentials. The lab runs from the `robo-harness-deploy` git worktree (a checkout of a tagged release) with its data directory outside any checkout via `ROBO_DATA_DIR`; see `docs/real-arm-preflight.md`.
+Tailscale access is the default; human trust comes from the peer address, not a header. Development shells run in a hardened bridge-network container with a short-lived capability token and no hardware or provider credentials. The lab runs the systemd units from this `main` working tree (no worktree or deploy branch); real config and the provider credentials live in `~/.config/robo-harness.env` so the repo `.env` stays dev/mock, and data lives outside the repo via `ROBO_DATA_DIR`. See `docs/real-arm-preflight.md`.
 
 ## Direction
 

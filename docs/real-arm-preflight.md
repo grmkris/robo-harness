@@ -6,7 +6,7 @@ The user confirmed the workspace was clear and authorized powered movement. The 
 
 - Workbench: http://100.105.51.45:8940, Tailscale access without login.
 - Netcup development checkout: `/home/kristjan/code/robo-harness` (branch `main`).
-- Netcup deployment: `/home/kristjan/code/robo-harness-deploy`, a git worktree on the `deploy` branch that only ever fast-forwards to a tagged release; both systemd units run from it. Data (sqlite, tokens, recordings, workspaces) lives in `/home/kristjan/.local/state/robo-harness` via `ROBO_DATA_DIR`, so a checkout can be replaced without touching evidence.
+- Netcup deployment: both systemd units (`robo-app`, `robo-rerun`) run from the `main` working tree at `/home/kristjan/code/robo-harness` — no worktree, no deploy branch. Real config and the Alibaba/Grok credentials are in `/home/kristjan/.config/robo-harness.env` (the repo `.env` is dev/mock; Bun lets the systemd env file win). Data lives in `/home/kristjan/.local/state/robo-harness` via `ROBO_DATA_DIR`. Promote with `bun run build` then `systemctl --user restart robo-app robo-rerun`.
 - Netcup firewall: ufw denies everything not on `tailscale0`, so development containers on Docker's bridge need `sudo ufw allow in on docker0 to 100.105.51.45 port 8940 proto tcp` (applied 2026-09-07). Bridge peers are still refused as operators; they authenticate with their program token.
 - Netcup user services: `robo-app.service` and `robo-rerun.service`, enabled with user lingering already active.
 - Pi: `kris@100.77.154.45`; deployment `/home/kris/robo-harness`.

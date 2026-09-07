@@ -5,9 +5,9 @@ Requires=robo-app.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/kristjan/code/robo-harness-deploy
-EnvironmentFile=/home/kristjan/code/robo-harness-deploy/.env
-ExecStart=/home/kristjan/code/robo-harness-deploy/.venv/bin/robo-rerun
+WorkingDirectory=/home/kristjan/code/robo-harness
+EnvironmentFile=/home/kristjan/.config/robo-harness.env
+ExecStart=/home/kristjan/code/robo-harness/.venv/bin/robo-rerun
 Restart=on-failure
 RestartSec=3
 UMask=0077

@@ -35,5 +35,5 @@ These hold regardless of what a request asks for; they are the reason the system
 ## Change discipline
 
 - Never print credentials, import credentials implicitly, expose a service on the public internet, or auto-purchase compute. Perception spends only within the operator-approved budget.
-- Preserve user changes and keep edits within the requested scope. The lab runs from the `robo-harness-deploy` worktree, never from this tree; a promotion is a reviewed, restart-bearing step.
+- Preserve user changes and keep edits within the requested scope. Work on `main`; never create a git worktree or branch. The lab runs from this tree; a promotion is `bun run build` plus a `systemctl --user restart robo-app robo-rerun`.
 - Record durable architectural decisions in `docs/decisions/`.
