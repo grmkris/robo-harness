@@ -1,71 +1,90 @@
-import type { AppEvent, ProviderInfo } from "@robo/domain";
+import type { AppEvent } from "@robo/domain";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 
 import { api, time } from "../lib/client";
 import type { Status } from "../lib/types";
 import { MoveIcon } from "./icons";
 
+export interface ModelOption {
+  model: string;
+  provider: string;
+  providerName: string;
+}
+
 export function ChatTab({
-  providers,
+  modelOptions,
   conversations,
   provider,
   setProvider,
+  model,
+  setModel,
   session,
   setSession,
   running,
   draft,
   setDraft,
   chatEvents,
+  pendingUser,
+  setPendingUser,
   message,
   setMessage,
   available,
   setError,
   chatEndRef,
 }: {
-  providers: ProviderInfo[];
+  modelOptions: ModelOption[];
   conversations: Status["conversations"];
   provider: string;
   setProvider: Dispatch<SetStateAction<string>>;
+  model: string;
+  setModel: Dispatch<SetStateAction<string>>;
   session: string | undefined;
   setSession: Dispatch<SetStateAction<string | undefined>>;
   running: boolean;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   chatEvents: AppEvent[];
+  pendingUser: string | null;
+  setPendingUser: Dispatch<SetStateAction<string | null>>;
   message: string;
   setMessage: Dispatch<SetStateAction<string>>;
   available: boolean;
   setError: Dispatch<SetStateAction<string>>;
   chatEndRef: RefObject<HTMLDivElement | null>;
 }) {
+  const resetConversation = () => {
+    setSession(undefined);
+    setDraft("");
+    setPendingUser(null);
+  };
   return (
     <>
       <div className="chat-settings">
         <select
-          aria-label="Agent provider"
-          value={provider}
+          aria-label="Model"
+          value={provider && model ? `${provider}:${model}` : ""}
           disabled={running}
           onChange={(e) => {
-            setProvider(e.target.value);
-            setSession(undefined);
-            setDraft("");
+            const [prov, ...rest] = e.target.value.split(":");
+            setProvider(prov ?? "");
+            setModel(rest.join(":"));
+            resetConversation();
           }}
         >
-          <option value="">Choose provider</option>
-          {providers.map((p) => (
-            <option key={p.id} value={p.id} disabled={!p.available}>
-              {p.name}
-              {p.available ? "" : " · unavailable"}
+          <option value="">Choose model</option>
+          {modelOptions.map((o) => (
+            <option
+              key={`${o.provider}:${o.model}`}
+              value={`${o.provider}:${o.model}`}
+            >
+              {o.model} ({o.providerName})
             </option>
           ))}
         </select>
         <button
           className="quiet"
           disabled={running}
-          onClick={() => {
-            setSession(undefined);
-            setDraft("");
-          }}
+          onClick={resetConversation}
         >
           New
         </button>
@@ -78,18 +97,19 @@ export function ChatTab({
           onChange={(e) => {
             setSession(e.target.value || undefined);
             setDraft("");
+            setPendingUser(null);
           }}
         >
           <option value="">New conversation</option>
           {conversations?.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.provider} · {new Date(c.created).toLocaleString()}
+              {c.model ?? c.provider} · {new Date(c.created).toLocaleString()}
             </option>
           ))}
         </select>
       </div>
       <div className="chat-log" aria-live="polite">
-        {chatEvents.length === 0 ? (
+        {chatEvents.length === 0 && !pendingUser ? (
           <div className="chat-empty">
             <div className="orb">
               <MoveIcon />
@@ -149,6 +169,14 @@ export function ChatTab({
             )}
           </article>
         ))}
+        {pendingUser ? (
+          <article className="chat-event user">
+            <small>
+              YOU <span className="typing">●</span>
+            </small>
+            <p>{pendingUser}</p>
+          </article>
+        ) : null}
         {draft ? (
           <article className="chat-event">
             <small>
@@ -169,23 +197,27 @@ export function ChatTab({
         className="composer"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!message.trim()) {
+          const text = message.trim();
+          if (!text) {
             return;
           }
           setError("");
           try {
             if (running) {
-              await api("chat/steer", { id: session, text: message });
+              await api("chat/steer", { id: session, text });
             } else {
+              setPendingUser(text);
               const reply = await api<{ session_id: string }>("chat", {
                 provider,
-                text: message,
+                model,
+                text,
                 session_id: session,
               });
               setSession(reply.session_id);
             }
             setMessage("");
           } catch (error) {
+            setPendingUser(null);
             setError((error as Error).message);
           }
         }}
@@ -200,7 +232,9 @@ export function ChatTab({
           rows={3}
         />
         <div>
-          <span>{running ? "Agent is working" : "Custom agent loop"}</span>
+          <span>
+            {running ? "Agent is working" : model || "Custom agent loop"}
+          </span>
           {running ? (
             <button
               type="button"
@@ -212,7 +246,7 @@ export function ChatTab({
               Cancel turn
             </button>
           ) : null}
-          <button className="send" disabled={!provider || !message.trim()}>
+          <button className="send" disabled={!model || !message.trim()}>
             {running ? "Steer" : "Send"} ↗
           </button>
         </div>

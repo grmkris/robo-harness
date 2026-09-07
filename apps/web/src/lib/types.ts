@@ -8,7 +8,12 @@ export interface Status {
   controller: string;
   running: string[];
   providers: ProviderInfo[];
-  conversations: Array<{ id: string; provider: string; created: number }>;
+  conversations: Array<{
+    id: string;
+    provider: string;
+    model?: string;
+    created: number;
+  }>;
   recording: {
     id: string;
     label: string;

@@ -487,10 +487,16 @@ h2 {
   white-space: pre-wrap;
 }
 .chat-event.user {
-  background: #edf1e6;
-  padding: 12px;
+  background: #e4ecd8;
+  padding: 12px 14px;
   border: 0;
+  border-left: 3px solid #759653;
   border-radius: 5px;
+  margin-left: 22px;
+}
+.chat-event.user small {
+  color: #4f6b39;
+  font-weight: 700;
 }
 .chat-event details {
   font-size: 11px;

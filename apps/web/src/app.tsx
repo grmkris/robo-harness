@@ -22,17 +22,19 @@ import { label, newId } from "./lib/client";
 export function App() {
   const { logged, setLogged, status, error, setError, viewTick, refresh } =
     useStatus();
-  const { events, setEvents, draft, setDraft } = useEvents(logged);
+  const [session, setSession] = useState<string | undefined>(
+    () => sessionStorage.getItem("robo-conversation") ?? undefined
+  );
+  const { events, setEvents, draft, setDraft } = useEvents(logged, session);
   const [tab, setTab] = useState("chat");
   const [replay, setReplay] = useState<string | null>(null);
   const [fallback, setFallback] = useState(false);
   const [recordName, setRecordName] = useState(
     `Exploration ${new Date().toLocaleDateString()}`
   );
-  const [session, setSession] = useState<string | undefined>(
-    () => sessionStorage.getItem("robo-conversation") ?? undefined
-  );
   const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
+  const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [camera, setCamera] = useState("workspace");
   const [perceptionPrompt, setPerceptionPrompt] = useState("white object");
@@ -56,7 +58,14 @@ export function App() {
   const activeMove =
     obs?.operation?.status === "running" ||
     obs?.operation?.status === "accepted";
-  useConversation({ logged, session, setProvider, setEvents, setError });
+  useConversation({
+    logged,
+    session,
+    setProvider,
+    setModel,
+    setEvents,
+    setError,
+  });
   useLease(own, setError);
   const { records } = useRecordings({
     tab,
@@ -65,14 +74,37 @@ export function App() {
     setError,
   });
   const { pending, run, halt } = useRun({ refresh, setError });
+  // Pick a sensible default model (the first available provider's first model)
+  // once, so the flat picker starts on something usable.
   useEffect(() => {
-    if (!provider && status?.providers.some((p) => p.available)) {
-      setProvider(status.providers.find((p) => p.available)!.id);
+    if (model) {
+      return;
     }
-  }, [status?.providers, provider]);
+    const first = status?.providers.find((p) => p.available && p.models.length);
+    if (first) {
+      setProvider(first.id);
+      setModel(first.models[0]!);
+    }
+  }, [status?.providers, model]);
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ block: "nearest" });
   }, [events.length, draft]);
+  // Once the server echoes the optimistic message back for this session, drop
+  // the local copy so it doesn't linger if the conversation is revisited.
+  useEffect(() => {
+    if (
+      pendingUser !== null &&
+      events.some(
+        (e) =>
+          e.type === "chat.message" &&
+          e.data["session_id"] === session &&
+          e.data["role"] === "user" &&
+          e.data["text"] === pendingUser
+      )
+    ) {
+      setPendingUser(null);
+    }
+  }, [events, session, pendingUser]);
   if (logged === false) {
     return (
       <Login
@@ -98,6 +130,28 @@ export function App() {
       e.data["session_id"] === session &&
       !["chat.delta", "chat.finished"].includes(e.type)
   );
+  // Every model of every available provider, flattened so chat picks a model
+  // directly and the provider is inferred from the chosen entry.
+  const modelOptions = (status?.providers ?? [])
+    .filter((p) => p.available)
+    .flatMap((p) =>
+      p.models.map((m) => ({
+        model: m,
+        provider: p.id,
+        providerName: p.name,
+      }))
+    );
+  // The optimistic "YOU" bubble is shown until the server echoes the same text
+  // back as a real user message for this session — then the real one takes over.
+  const pendingEchoed =
+    pendingUser !== null &&
+    chatEvents.some(
+      (e) =>
+        e.type === "chat.message" &&
+        e.data["role"] === "user" &&
+        e.data["text"] === pendingUser
+    );
+  const pendingShown = pendingEchoed ? null : pendingUser;
   const lastPerception = events.findLast(
     (e) => e.type === "perception.completed"
   );
@@ -180,16 +234,20 @@ export function App() {
           </nav>
           {tab === "chat" ? (
             <ChatTab
-              providers={status.providers}
+              modelOptions={modelOptions}
               conversations={status.conversations}
               provider={provider}
               setProvider={setProvider}
+              model={model}
+              setModel={setModel}
               session={session}
               setSession={setSession}
               running={running}
               draft={draft}
               setDraft={setDraft}
               chatEvents={chatEvents}
+              pendingUser={pendingShown}
+              setPendingUser={setPendingUser}
               message={message}
               setMessage={setMessage}
               available={available}

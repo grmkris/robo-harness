@@ -8,10 +8,11 @@ export function useConversation(opts: {
   logged: boolean | null;
   session: string | undefined;
   setProvider: Dispatch<SetStateAction<string>>;
+  setModel: Dispatch<SetStateAction<string>>;
   setEvents: Dispatch<SetStateAction<AppEvent[]>>;
   setError: Dispatch<SetStateAction<string>>;
 }) {
-  const { logged, session, setProvider, setEvents, setError } = opts;
+  const { logged, session, setProvider, setModel, setEvents, setError } = opts;
   useEffect(() => {
     if (session) {
       sessionStorage.setItem("robo-conversation", session);
@@ -21,11 +22,13 @@ export function useConversation(opts: {
     if (!logged || !session) {
       return;
     }
-    void api<{ conversation: { provider: string }; events: AppEvent[] }>(
-      `conversations/${session}`
-    )
+    void api<{
+      conversation: { provider: string; model: string };
+      events: AppEvent[];
+    }>(`conversations/${session}`)
       .then((result) => {
         setProvider(result.conversation.provider);
+        setModel(result.conversation.model);
         setEvents((previous) =>
           [
             ...new Map(
@@ -35,5 +38,5 @@ export function useConversation(opts: {
         );
       })
       .catch((error) => setError(error.message));
-  }, [session, logged, setProvider, setEvents, setError]);
+  }, [session, logged, setProvider, setModel, setEvents, setError]);
 }
