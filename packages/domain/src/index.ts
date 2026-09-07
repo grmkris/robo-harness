@@ -123,7 +123,10 @@ export const ProviderInfo = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   available: Schema.Boolean,
+  // The default model, and the full set a caller may choose from. `model` is
+  // `models[0]`; both are kept so an older client that only reads `model` works.
   model: Schema.String,
+  models: Schema.Array(Schema.String),
   vision: Schema.Boolean,
   reason: Schema.optionalKey(Schema.String),
 });

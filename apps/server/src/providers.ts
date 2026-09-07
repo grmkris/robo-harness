@@ -48,14 +48,33 @@ async function xaiToken() {
     return null;
   }
 }
+// A provider's selectable models: the default first, plus any extras from a
+// comma-separated `ROBO_<PROVIDER>_MODELS` env, de-duplicated. Keeping the list
+// env-driven means only models the account can actually serve are offered.
+function modelList(defaultModel: string, extrasEnv: string): string[] {
+  const extras = (process.env[extrasEnv] ?? "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  return [...new Set([defaultModel, ...extras])];
+}
 export async function catalog(): Promise<ProviderInfo[]> {
   const xai = Boolean(await xaiToken());
+  const alibabaModels = modelList(
+    process.env["ROBO_ALIBABA_MODEL"] ?? "qwen3.8-max",
+    "ROBO_ALIBABA_MODELS"
+  );
+  const xaiModels = modelList(
+    process.env["ROBO_XAI_MODEL"] ?? "grok-4.6",
+    "ROBO_XAI_MODELS"
+  );
   return [
     {
       id: "alibaba",
       name: "Alibaba Token Plan",
       available: Boolean(alibabaKey()),
-      model: process.env["ROBO_ALIBABA_MODEL"] ?? "qwen3.8-max",
+      model: alibabaModels[0] ?? "qwen3.8-max",
+      models: alibabaModels,
       vision: process.env["ROBO_ALIBABA_VISION"] === "1",
       ...(alibabaKey()
         ? {}
@@ -65,7 +84,8 @@ export async function catalog(): Promise<ProviderInfo[]> {
       id: "xai",
       name: "xAI / Grok",
       available: xai,
-      model: process.env["ROBO_XAI_MODEL"] ?? "grok-4.6",
+      model: xaiModels[0] ?? "grok-4.6",
+      models: xaiModels,
       vision: process.env["ROBO_XAI_VISION"] !== "0",
       ...(xai
         ? {}
@@ -78,6 +98,7 @@ export async function catalog(): Promise<ProviderInfo[]> {
       name: "Claude",
       available: false,
       model: "",
+      models: [],
       vision: true,
       reason: "Direct subscription adapter pending verification",
     },
@@ -86,16 +107,23 @@ export async function catalog(): Promise<ProviderInfo[]> {
       name: "Codex",
       available: false,
       model: "",
+      models: [],
       vision: true,
       reason: "Direct subscription adapter pending verification",
     },
   ];
 }
-export async function resolveModel(provider: string) {
+export async function resolveModel(provider: string, model?: string) {
   const info = (await catalog()).find((p) => p.id === provider);
   if (!info?.available) {
     throw new ApiError(info?.reason ?? "Unknown provider", 422);
   }
+  // A caller may choose any of the provider's advertised models; anything else
+  // is refused rather than silently sent to the API.
+  if (model !== undefined && !info.models.includes(model)) {
+    throw new ApiError(`Model ${model} is not available for ${provider}`, 422);
+  }
+  const chosen = model ?? info.model;
   const key = alibabaKey();
   const client = createOpenAICompatible({
     name: provider,
@@ -124,5 +152,5 @@ export async function resolveModel(provider: string) {
         }
       : {}),
   });
-  return { model: client(info.model), info };
+  return { model: client(chosen), info: { ...info, model: chosen } };
 }

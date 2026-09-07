@@ -99,7 +99,12 @@ function frameMessage(frame: Frame): ModelMessage {
     ],
   };
 }
-export async function startChat(provider: string, text: string, id?: string) {
+export async function startChat(
+  provider: string,
+  model: string | undefined,
+  text: string,
+  id?: string
+) {
   const sessionId = id ?? crypto.randomUUID();
   // Reserve the session synchronously, before any await, so two concurrent
   // starts on the same id cannot both pass the guard.
@@ -110,12 +115,15 @@ export async function startChat(provider: string, text: string, id?: string) {
   sessions.set(sessionId, state);
   let resolved: Awaited<ReturnType<typeof resolveModel>>;
   try {
-    resolved = await resolveModel(provider);
+    resolved = await resolveModel(provider, model);
     const existing = db
-      .query("SELECT provider FROM conversations WHERE id=?")
-      .get(sessionId) as { provider: string } | null;
-    if (existing && existing.provider !== provider) {
-      throw new ApiError("Start a new conversation to change provider");
+      .query("SELECT provider,model FROM conversations WHERE id=?")
+      .get(sessionId) as { provider: string; model: string } | null;
+    if (
+      existing &&
+      (existing.provider !== provider || existing.model !== resolved.info.model)
+    ) {
+      throw new ApiError("Start a new conversation to change the model");
     }
     db.query(
       "INSERT OR IGNORE INTO conversations(id,provider,model,created) VALUES(?,?,?,?)"

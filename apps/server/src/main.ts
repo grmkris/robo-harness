@@ -340,6 +340,7 @@ async function handle(req: Request): Promise<Response> {
       const body = decode(
         Schema.Struct({
           provider: Schema.String,
+          model: Schema.optionalKey(Schema.String),
           text: Schema.String.check(
             Schema.isMinLength(1),
             Schema.isMaxLength(24_000)
@@ -349,7 +350,12 @@ async function handle(req: Request): Promise<Response> {
         await parse(req)
       );
       return json(
-        await agent.startChat(body.provider, body.text, body.session_id)
+        await agent.startChat(
+          body.provider,
+          body.model,
+          body.text,
+          body.session_id
+        )
       );
     }
     if (path === "/api/chat/cancel" && req.method === "POST") {
