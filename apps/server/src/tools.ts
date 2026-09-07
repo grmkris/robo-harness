@@ -1,12 +1,13 @@
 import type { Frame } from "@robo/domain";
 import {
-  std,
+  toolInputSchema,
   toolSchemas,
   type MoveInput,
   type ToolName,
 } from "@robo/protocol";
-import { tool } from "ai";
+import { jsonSchema, tool } from "ai";
 import type { ToolSet } from "ai";
+import { Schema } from "effect";
 
 import { decode } from "./decode";
 import { perceive } from "./perception";
@@ -98,7 +99,29 @@ export function agentTools(
       name,
       tool({
         description: descriptions[name],
-        inputSchema: std(toolSchemas[name]),
+        inputSchema: jsonSchema<Record<string, unknown>>(
+          toolInputSchema(name),
+          {
+            validate: (value) => {
+              try {
+                return {
+                  success: true,
+                  value: Schema.decodeUnknownSync(toolSchemas[name], {
+                    onExcessProperty: "error",
+                  })(value) as Record<string, unknown>,
+                };
+              } catch (error) {
+                return {
+                  success: false,
+                  error:
+                    error instanceof Error
+                      ? error
+                      : new Error("Invalid tool input"),
+                };
+              }
+            },
+          }
+        ),
         execute: async (input: Record<string, unknown>) => {
           try {
             const output = await executeTool(name, input, p, signal);

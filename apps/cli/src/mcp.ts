@@ -3,24 +3,19 @@
 // validates arguments and owns the leases; this process holds no state. The
 // tool JSON Schema is derived from the same Effect Schema the coordinator
 // decodes with, so the model is told exactly what the server will accept.
-import { callTool, std, toolSchemas, type ToolName } from "@robo/protocol";
+import {
+  callTool,
+  toolInputSchema,
+  toolSchemas,
+  type ToolName,
+} from "@robo/protocol";
 
 const names = Object.keys(toolSchemas) as ToolName[];
 const READ_ONLY = new Set<ToolName>(["observe", "capture", "operation"]);
-// MCP requires each tool's inputSchema to be an object schema. A tool with no
-// arguments serialises to an `anyOf`, so it is normalised to an empty object.
-function inputSchema(name: ToolName): Record<string, unknown> {
-  const json = std(toolSchemas[name])["~standard"].jsonSchema.input({
-    target: "draft-2020-12",
-  }) as Record<string, unknown>;
-  return json["type"] === "object"
-    ? json
-    : { type: "object", properties: {}, additionalProperties: false };
-}
 const tools = names.map((name) => ({
   name: `robot_${name}`,
   description: `Robo Harness ${name}. Joint degrees, gripper percent, Cartesian meters. Motion requires an active lease.`,
-  inputSchema: inputSchema(name),
+  inputSchema: toolInputSchema(name),
   annotations: { readOnlyHint: READ_ONLY.has(name) },
 }));
 

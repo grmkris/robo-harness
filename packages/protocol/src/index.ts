@@ -1,6 +1,8 @@
 import { joints, type Joint } from "@robo/domain";
 import { Effect, Schema } from "effect";
 
+import { std } from "./std";
+
 export { callTool } from "./client";
 export { std } from "./std";
 
@@ -86,3 +88,15 @@ export const toolSchemas = {
   }),
 } as const;
 export type ToolName = keyof typeof toolSchemas;
+
+// The model requires each tool's input to be an object schema. A no-argument
+// tool serialises to an `anyOf`, which some providers (xAI) reject, so it is
+// normalised to an empty object.
+export function toolInputSchema(name: ToolName): Record<string, unknown> {
+  const json = std(toolSchemas[name])["~standard"].jsonSchema.input({
+    target: "draft-2020-12",
+  }) as Record<string, unknown>;
+  return json["type"] === "object"
+    ? json
+    : { type: "object", properties: {}, additionalProperties: false };
+}
