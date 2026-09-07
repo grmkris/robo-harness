@@ -7,6 +7,10 @@ import { ApiError } from "./robot";
 
 const alibaba =
   "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
+// The token-plan key is stored as ALIBABA_TOKEN_PLAN_API_KEY on this machine;
+// accept it as well as the OpenAI-compatible DASHSCOPE_API_KEY name.
+const alibabaKey = () =>
+  process.env["DASHSCOPE_API_KEY"] ?? process.env["ALIBABA_TOKEN_PLAN_API_KEY"];
 async function xaiToken() {
   if (process.env["XAI_API_KEY"]) {
     return process.env["XAI_API_KEY"];
@@ -50,12 +54,12 @@ export async function catalog(): Promise<ProviderInfo[]> {
     {
       id: "alibaba",
       name: "Alibaba Token Plan",
-      available: Boolean(process.env["DASHSCOPE_API_KEY"]),
+      available: Boolean(alibabaKey()),
       model: process.env["ROBO_ALIBABA_MODEL"] ?? "qwen3.8-max",
       vision: process.env["ROBO_ALIBABA_VISION"] === "1",
-      ...(process.env["DASHSCOPE_API_KEY"]
+      ...(alibabaKey()
         ? {}
-        : { reason: "Set DASHSCOPE_API_KEY" }),
+        : { reason: "Set DASHSCOPE_API_KEY or ALIBABA_TOKEN_PLAN_API_KEY" }),
     },
     {
       id: "xai",
@@ -92,6 +96,7 @@ export async function resolveModel(provider: string) {
   if (!info?.available) {
     throw new ApiError(info?.reason ?? "Unknown provider", 422);
   }
+  const key = alibabaKey();
   const client = createOpenAICompatible({
     name: provider,
     baseURL:
@@ -99,9 +104,7 @@ export async function resolveModel(provider: string) {
         ? (process.env["ROBO_ALIBABA_URL"] ?? alibaba)
         : "https://api.x.ai/v1",
     includeUsage: true,
-    ...(provider === "alibaba" && process.env["DASHSCOPE_API_KEY"]
-      ? { apiKey: process.env["DASHSCOPE_API_KEY"] }
-      : {}),
+    ...(provider === "alibaba" && key ? { apiKey: key } : {}),
     ...(provider === "xai"
       ? {
           fetch: Object.assign(
