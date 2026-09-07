@@ -11,7 +11,7 @@ await mkdir(folder, { recursive: true });
 const client = new Client({ name: "real-arm-acceptance", version: "1.0.0" });
 const transport = new StdioClientTransport({
   command: "bun",
-  args: [`${root}/src/mcp.ts`],
+  args: [`${root}/apps/cli/src/mcp.ts`],
   cwd: root,
   env: {
     PATH: process.env["PATH"]!,
