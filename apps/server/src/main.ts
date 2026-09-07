@@ -128,7 +128,8 @@ async function handle(req: Request): Promise<Response> {
   const path = url.pathname;
   if (!["GET", "HEAD"].includes(req.method)) {
     const origin = req.headers.get("origin");
-    if (origin && !config.allowedOrigins.has(origin)) {
+    const selfOrigin = `http://${config.host}:${server.port}`;
+    if (origin && origin !== selfOrigin && !config.allowedOrigins.has(origin)) {
       return json({ error: "Origin mismatch" }, 403);
     }
   }
@@ -488,7 +489,13 @@ const sampler = setInterval(() => {
 subscribe((event) => {
   void recording.recordEvent(event).catch(() => {});
 });
-console.log(`Robo Harness listening on http://${config.host}:${config.port}`);
+const address = `http://${config.host}:${server.port}`;
+console.log(`Robo Harness listening on ${address}`);
+// Machine-readable line so a test harness can read the resolved port when
+// ROBO_PORT is 0, instead of racing a fixed port.
+console.log(
+  JSON.stringify({ event: "listening", host: config.host, port: server.port })
+);
 console.log(
   config.accessMode === "tailnet"
     ? "Tailscale access enabled; no operator login."

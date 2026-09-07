@@ -1,44 +1,21 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
-const root = join(import.meta.dir, "../../..");
-const base = "http://127.0.0.1:18942";
-let child: ReturnType<typeof Bun.spawn>;
-let directory = "";
+import { type Harness, startHarness } from "./harness";
+
+let h: Harness;
+let base: string;
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), "robo-tailnet-"));
-  child = Bun.spawn(["bun", "apps/server/src/main.ts"], {
-    cwd: root,
-    env: {
-      ...process.env,
-      ROBO_HOST: "127.0.0.1",
-      ROBO_PORT: "18942",
-      ROBO_ACCESS_MODE: "tailnet",
-      ROBO_DATA_DIR: directory,
-      ROBO_IO_URL: "http://127.0.0.1:18949",
-    },
-    stdout: "ignore",
-    stderr: "pipe",
+  h = await startHarness({
+    accessMode: "tailnet",
+    withIo: false,
+    withFixture: false,
   });
-  for (let n = 0; n < 60; n++) {
-    try {
-      if ((await fetch(`${base}/api/status`)).ok) {
-        return;
-      }
-    } catch {}
-    await Bun.sleep(50);
-  }
-  throw new Error("Tailnet application did not start");
-});
+  base = h.base;
+}, 30_000);
 afterAll(async () => {
-  child?.kill();
-  await child?.exited;
-  if (directory) {
-    await rm(directory, { recursive: true, force: true });
-  }
+  await h.close();
 });
+
 test("tailnet browser opens without a token and keeps browser identities distinct", async () => {
   const a = await fetch(`${base}/api/status`, {
     headers: { "X-Robo-Browser": "browser-a" },

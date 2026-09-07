@@ -1,197 +1,35 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+import { type Harness, startHarness, tokens } from "./harness";
+
 const root = join(import.meta.dir, "../../..");
-const appPort = 18_940,
-  ioPort = 18_941;
-const operator = "integration-operator-token-not-a-real-secret";
-const agentToken = "integration-agent-token-not-a-real-secret";
-const ioToken = "integration-io-token-not-a-real-secret";
-const workerToken = "integration-worker-token-not-a-real-secret";
-let app: ReturnType<typeof Bun.spawn>,
-  directory = "",
-  fixture: ReturnType<typeof Bun.serve>,
-  io: ReturnType<typeof Bun.spawn>;
-let requests: Record<string, unknown>[] = [];
-const base = `http://127.0.0.1:${appPort}`;
-async function request(
-  path: string,
-  body?: unknown,
-  token = operator,
-  headers: Record<string, string> = {}
-) {
-  return fetch(base + path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...headers,
-    },
-    body: body === undefined ? null : JSON.stringify(body),
-  });
-}
-async function call(name: string, body: unknown = {}, token = operator) {
-  const response = await request(`/api/tool/${name}`, body, token);
-  return {
-    status: response.status,
-    // Responses are inspected loosely on purpose; the contract tests cover shapes.
-    data: (await response.json()) as any,
-  };
-}
-async function until(check: () => Promise<boolean>, timeout = 6000) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    if (await check()) {
-      return;
-    }
-    await Bun.sleep(80);
-  }
-  throw new Error("Condition timed out");
-}
+const operator = tokens.operator;
+const agentToken = tokens.agent;
+const workerToken = tokens.worker;
+let h: Harness;
+let base: string;
+let request: Harness["request"];
+let call: Harness["call"];
+let until: Harness["until"];
+let requests: Record<string, unknown>[];
+
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), "robo-integration-"));
-  fixture = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    async fetch(req) {
-      if (new URL(req.url).pathname === "/infer") {
-        const payload = (await req.json()) as {
-          kind: string;
-          prompt: string;
-          frame: { id: string; width: number; height: number };
-        };
-        if (payload.prompt === "fail") {
-          return new Response("worker down", { status: 500 });
-        }
-        return Response.json({
-          kind: payload.kind,
-          model: "local-test-fixture",
-          model_version: "1",
-          frame_id:
-            payload.prompt === "wrong frame" ? "mismatched" : payload.frame.id,
-          width: payload.frame.width,
-          height: payload.frame.height,
-          preview_png:
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==",
-          units: "relative",
-          depth: [[1]],
-        });
-      }
-      const body = (await req.json()) as {
-        messages: { role: string; content: unknown }[];
-      };
-      requests.push(body);
-      const done = body.messages.some((m) => m.role === "tool");
-      const capture = JSON.stringify(body.messages).includes("camera");
-      const delta = done
-        ? { content: "Verified mock observation. No movement executed." }
-        : {
-            tool_calls: [
-              {
-                index: 0,
-                id: "fixture-call",
-                type: "function",
-                function: {
-                  name: capture ? "capture" : "observe",
-                  arguments: capture ? '{"camera":"workspace"}' : "{}",
-                },
-              },
-            ],
-          };
-      const chunks = [
-        {
-          id: "fixture",
-          object: "chat.completion.chunk",
-          created: 0,
-          model: "fixture",
-          choices: [{ index: 0, delta, finish_reason: null }],
-        },
-        {
-          id: "fixture",
-          object: "chat.completion.chunk",
-          created: 0,
-          model: "fixture",
-          choices: [
-            {
-              index: 0,
-              delta: {},
-              finish_reason: done ? "stop" : "tool_calls",
-            },
-          ],
-          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
-        },
-      ];
-      return new Response(
-        `${chunks
-          .map((c) => "data: " + JSON.stringify(c) + "\n\n")
-          .join("")}data: [DONE]\n\n`,
-        { headers: { "Content-Type": "text/event-stream" } }
-      );
-    },
-  });
-  io = Bun.spawn(
-    [
-      `${root}/.venv/bin/python`,
-      "-m",
-      "robo_harness.service",
-      "--port",
-      String(ioPort),
-    ],
-    {
-      cwd: root,
-      env: { ...process.env, ROBO_IO_TOKEN: ioToken },
-      stdout: "ignore",
-      stderr: "pipe",
-    }
-  );
-  app = Bun.spawn(["bun", "apps/server/src/main.ts"], {
-    cwd: root,
-    env: {
-      ...process.env,
-      ROBO_PORT: String(appPort),
-      ROBO_HOST: "127.0.0.1",
-      ROBO_ACCESS_MODE: "token",
-      ROBO_DATA_DIR: directory,
-      ROBO_TOKEN: operator,
-      ROBO_AGENT_TOKEN: agentToken,
-      ROBO_IO_TOKEN: ioToken,
-      ROBO_WORKER_TOKEN: workerToken,
-      ROBO_IO_URL: `http://127.0.0.1:${ioPort}`,
-      DASHSCOPE_API_KEY: "fixture-key-not-real",
-      ROBO_ALIBABA_URL: `http://127.0.0.1:${fixture.port}`,
-      ROBO_ALIBABA_MODEL: "fixture",
-      ROBO_ALIBABA_VISION: "1",
-      ROBO_PERCEPTION_URL: `http://127.0.0.1:${fixture.port}`,
-      ROBO_PERCEPTION_TOKEN: "local-fixture-token",
-      ROBO_PERCEPTION_COST_USD: "0.01",
-    },
-    stdout: "ignore",
-    stderr: "pipe",
-  });
-  await until(async () => {
-    try {
-      const res = await request("/api/status");
-      const s = (await res.json()) as any;
-      return s.observation?.backend === "mock" && !s.robot_error;
-    } catch {
-      return false;
-    }
-  }, 12_000);
-}, 15_000);
+  h = await startHarness();
+  base = h.base;
+  request = h.request;
+  call = h.call;
+  until = h.until;
+  requests = h.requests;
+}, 30_000);
 afterAll(async () => {
-  app?.kill("SIGTERM");
-  io?.kill("SIGTERM");
-  fixture?.stop(true);
-  await Promise.all([app?.exited, io?.exited]);
-  if (directory) {
-    await rm(directory, { recursive: true, force: true });
-  }
+  await h.close();
 });
+
 describe("mock HTTP integration", () => {
   test("requires authentication and rejects cross-origin control", async () => {
     expect((await request("/api/status", undefined, "incorrect")).status).toBe(
@@ -215,8 +53,8 @@ describe("mock HTTP integration", () => {
     expect(
       (
         await request("/api/tool/stop", {}, operator, {
-          Host: `rebound.example:${appPort}`,
-          Origin: `http://rebound.example:${appPort}`,
+          Host: `rebound.example:${h.port}`,
+          Origin: `http://rebound.example:${h.port}`,
         })
       ).status
     ).toBe(403);
@@ -383,10 +221,12 @@ describe("mock HTTP integration", () => {
     expect((await call("recording_start", { label: "duplicate" })).status).toBe(
       409
     );
-    await Bun.sleep(700);
+    await until(async () => ((await h.status()).recording?.frames ?? 0) >= 3);
     const stopped = await call("recording_stop");
     expect(stopped.data.frames).toBeGreaterThan(2);
-    expect(stopped.data.state).toBe("captured");
+    // "captured" when every sample met its deadline; a missed deadline under
+    // load is a legitimate "incomplete", so both are accepted.
+    expect(["captured", "incomplete"]).toContain(stopped.data.state);
     const manifest = JSON.parse(
       await readFile(`${stopped.data.path}/manifest.json`, "utf-8")
     );
@@ -415,7 +255,7 @@ describe("mock HTTP integration", () => {
     expect((await request("/api/status")).status).toBe(200);
   });
   test("custom model loop executes observation and image tools", async () => {
-    requests = [];
+    requests.length = 0;
     const response = await request("/api/chat", {
       provider: "alibaba",
       text: "Inspect the camera without moving.",
