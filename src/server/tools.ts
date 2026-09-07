@@ -12,7 +12,7 @@ export interface Principal {
   owner: string;
   human: boolean;
 }
-export const descriptions: Record<ToolName, string> = {
+const descriptions: Record<ToolName, string> = {
   observe:
     "Read current measured/commanded joints, Cartesian pose, control owner, limits, camera freshness, and faults.",
   capture:

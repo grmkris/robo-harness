@@ -1,0 +1,15 @@
+# Opt-in only (`bun run hooks:install`); this directory may sit inside another repo.
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "*.{js,jsx,mjs,ts,tsx,json,jsonc,css,md,yml,yaml}"
+      run: bunx oxfmt --write {staged_files}
+      stage_fixed: true
+    lint:
+      run: bun run lint
+
+pre-push:
+  commands:
+    check:
+      run: bun run check

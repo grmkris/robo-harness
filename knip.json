@@ -1,0 +1,6 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["scripts/*.ts", "scripts/*.mjs", "tests/*.test.ts"],
+  "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mjs}", "tests/**/*.ts"],
+  "ignoreDependencies": ["@oxlint/plugins"]
+}

@@ -19,7 +19,7 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
-export async function io<T>(
+async function io<T>(
   path: string,
   body?: unknown,
   timeoutMs = 2000

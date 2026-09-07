@@ -6,7 +6,7 @@ import { config } from "./config";
 import { capture, ApiError } from "./robot";
 import { db, emit } from "./store";
 
-export const resultSchema = z.object({
+const resultSchema = z.object({
   kind: z.enum(["segment", "depth"]),
   model: z.string(),
   model_version: z.string(),

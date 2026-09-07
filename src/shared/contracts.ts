@@ -9,7 +9,7 @@ export const joints = [
   "gripper",
 ] as const;
 export type Joint = (typeof joints)[number];
-export type Pose = Record<Joint, number>;
+type Pose = Record<Joint, number>;
 export interface Observation {
   boot_id: string;
   seq: number;

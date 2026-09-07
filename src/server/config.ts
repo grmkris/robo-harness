@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 
 import { isLoopback, isTailnetAddress } from "./access";
 
-export const root = resolve(import.meta.dir, "../..");
-export const dataDir = resolve(process.env["ROBO_DATA_DIR"] ?? `${root}/var`);
+const root = resolve(import.meta.dir, "../..");
+const dataDir = resolve(process.env["ROBO_DATA_DIR"] ?? `${root}/var`);
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 function secret(name: string, environment?: string) {
   if (environment) {

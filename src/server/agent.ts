@@ -28,7 +28,7 @@ export function conversations() {
     )
     .all();
 }
-export function history(id: string) {
+function history(id: string) {
   const row = db.query("SELECT * FROM conversations WHERE id=?").get(id) as {
     messages: string;
   } | null;
