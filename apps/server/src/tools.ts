@@ -29,7 +29,7 @@ const descriptions: Record<ToolName, string> = {
   renew:
     "Renew your own control lease. Call while intentionally controlling the arm; expiry cancels motion.",
   release: "Release your control lease and hold the last commanded position.",
-  move: "Submit a bounded joint or position-only Cartesian move. Degrees for joints, 0–100 gripper, meters in base_link for xyz. Returns operation ID, not completion.",
+  move: "Submit a bounded joint or position-only Cartesian move and wait for measured completion. Degrees for joints, 0–100 gripper, meters in base_link for xyz. Returns the final operation (status completed/cancelled/failed and residual); an accepted status means it did not finish in time — read operation to keep watching.",
   operation: "Read measured completion or failure of a submitted motion.",
   stop: "Cancel motion, revoke control, and hold. Does not release motor torque.",
   perceive:
@@ -88,6 +88,31 @@ export async function executeTool(
     }
   }
 }
+const TERMINAL = new Set(["completed", "cancelled", "failed"]);
+const POLL_MS = 400;
+const COMPLETION_MARGIN_MS = 2000;
+// The chat agent's move waits for measured completion, mirroring
+// `robo_harness.client.Robot.move()`: submit, then renew the lease and poll the
+// operation until it reaches a terminal state or the motion's own deadline
+// passes. Renewing ONLY here — never for the whole turn — is what lets the
+// three-second lease lapse when the model idles between tools, so the motor
+// owner cancels motion in the safe direction.
+async function moveToCompletion(
+  input: MoveInput,
+  owner: string,
+  signal: AbortSignal
+): Promise<unknown> {
+  let op = await robot.move(owner, input);
+  const deadline =
+    Date.now() + (input.duration_s ?? 1) * 1000 + COMPLETION_MARGIN_MS;
+  while (!TERMINAL.has(op.status) && Date.now() < deadline) {
+    signal.throwIfAborted();
+    await robot.renew(owner).catch(() => {});
+    await Bun.sleep(POLL_MS);
+    op = await robot.operation(op.id);
+  }
+  return op;
+}
 export function agentTools(
   p: Principal,
   signal: AbortSignal,
@@ -122,28 +147,32 @@ export function agentTools(
             },
           }
         ),
+        // Errors are thrown, not returned as `{ error }`: the SDK turns a
+        // rejected execute into a tool-error part the model reads as a failure
+        // and the loop reports as `chat.tool_error`.
         execute: async (input: Record<string, unknown>) => {
-          try {
-            const output = await executeTool(name, input, p, signal);
-            if (name === "capture") {
-              const frame = output as Frame;
-              if (vision) {
-                onImage?.(frame);
-              }
-              return {
-                ...frame,
-                base64: undefined,
-                note: vision
-                  ? "Image supplied in the following observation message"
-                  : "Selected model is not configured for vision",
-              };
+          if (name === "move") {
+            return moveToCompletion(
+              decode(toolSchemas.move, input),
+              p.owner,
+              signal
+            );
+          }
+          const output = await executeTool(name, input, p, signal);
+          if (name === "capture") {
+            const frame = output as Frame;
+            if (vision) {
+              onImage?.(frame);
             }
-            return output;
-          } catch (error) {
             return {
-              error: error instanceof Error ? error.message : "Tool failed",
+              ...frame,
+              base64: undefined,
+              note: vision
+                ? "Image supplied in the following observation message"
+                : "Selected model is not configured for vision",
             };
           }
+          return output;
         },
         toModelOutput: ({ output }: { output: unknown }) => ({
           type: "text" as const,

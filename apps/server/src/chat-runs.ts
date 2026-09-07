@@ -3,7 +3,7 @@ import type { ModelMessage } from "ai";
 
 import { runChatLoop } from "./loop";
 import { resolveModel } from "./providers";
-import { release, renew, ApiError } from "./robot";
+import { release, ApiError } from "./robot";
 import { db, emit } from "./store";
 import { agentTools } from "./tools";
 
@@ -135,11 +135,10 @@ export async function startChat(provider: string, text: string, id?: string) {
   ];
   persist(opening);
   emit("chat.message", { session_id: sessionId, role: "user", text });
-  // Heartbeats last only while this turn actively owns a lease. Human takeover
-  // makes renew fail.
-  const heartbeat = setInterval(() => {
-    void renew(owner).catch(() => {});
-  }, 900);
+  // No whole-turn heartbeat: the lease is renewed only while the `move` tool
+  // waits for measured completion (see agentTools). A model that idles more
+  // than the three-second lease between tools loses control, and the motor
+  // owner cancels motion — the safe direction.
   void (async () => {
     try {
       const pendingImages: Frame[] = [];
@@ -209,7 +208,6 @@ export async function startChat(provider: string, text: string, id?: string) {
           : "Agent request failed. Check provider availability and model capabilities.",
       });
     } finally {
-      clearInterval(heartbeat);
       await release(owner).catch(() => {});
       sessions.delete(sessionId);
       emit("chat.finished", { session_id: sessionId });

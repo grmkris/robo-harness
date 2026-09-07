@@ -117,6 +117,25 @@ test("the first prompt carries the harness bar as its tail", async () => {
   expect(text).toContain("step 1/24");
 });
 
+test("a tool that throws surfaces as a tool-error part, not a swallowed result", async () => {
+  const model = scriptedModel([toolStep("boom", "c0"), textStep("recovered")]);
+  const failing = (): ToolSet => ({
+    boom: tool({
+      description: "always fails",
+      inputSchema: jsonSchema<Record<string, never>>({
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      }),
+      execute: (): Promise<{ ok: boolean }> =>
+        Promise.reject(new Error("nope")),
+    }),
+  });
+  const { types } = await drain(base(model, { tools: failing() }));
+  expect(types).toContain("tool-error");
+  expect(types).not.toContain("tool-result");
+});
+
 test("a steer that arrives after a text-only step starts another round that sees it", async () => {
   // The steer is not present when round 1's prepareStep drains; it lands only
   // on the post-round check (drain call 2), so it can only be answered by a
