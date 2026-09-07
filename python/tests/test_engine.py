@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,7 @@ def test_gripper_does_not_complete_on_accept(rig):
 
 
 def test_duplicate_and_conflicting_request(rig):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("a")
     one = e.submit("r", lease["lease_id"], "a", target={"shoulder_pan": 2})
     two = e.submit("r", lease["lease_id"], "a", target={"shoulder_pan": 2})
@@ -56,7 +57,7 @@ def test_duplicate_and_conflicting_request(rig):
 
 
 def test_takeover_revokes_old_controller(rig):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("a")
     op = e.submit("r", lease["lease_id"], "a", target={"shoulder_pan": 2})
     e.acquire("human", "human", True)
@@ -78,7 +79,7 @@ def test_lease_loss_holds_last_commanded_pose(rig):
 
 
 def test_no_overlapping_motion(rig):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("a")
     e.submit("r", lease["lease_id"], "a", target={"shoulder_pan": 2})
     with pytest.raises(ControlError, match="already running"):
@@ -95,7 +96,7 @@ def test_no_overlapping_motion(rig):
     ],
 )
 def test_invalid_targets_never_reach_driver(rig, target):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("a")
     before = e.driver.read()
     with pytest.raises(ControlError):
@@ -104,7 +105,7 @@ def test_invalid_targets_never_reach_driver(rig, target):
 
 
 def test_speed_rejection(rig):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("a")
     with pytest.raises(ControlError, match="speed"):
         e.submit("r", lease["lease_id"], "a", target={"shoulder_pan": 5}, duration_s=0.1)
@@ -119,7 +120,7 @@ def test_stale_observation_rejects_command(rig):
 
 
 def test_fault_latches_and_rejects_new_owner(rig):
-    e, c = rig
+    e, _ = rig
 
     def broken():
         raise OSError("bus disconnected")
@@ -143,7 +144,7 @@ def test_cartesian_roundtrip_and_unreachable(rig):
 
 
 def test_link_keepout_is_checked(rig):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("a")
     e.profile["keepout_boxes"] = [{"min": [-0.1, -0.1, -0.1], "max": [0.1, 0.1, 0.1]}]
     with pytest.raises(ControlError, match="keep-out"):
@@ -151,7 +152,7 @@ def test_link_keepout_is_checked(rig):
 
 
 def test_controller_cannot_renew_someone_elses_lease(rig):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("a")
     with pytest.raises(ControlError):
         e.renew(lease["lease_id"], "b")
@@ -167,9 +168,7 @@ def test_deadline_miss_cancels_motion(rig):
 
 
 def test_stop_can_interrupt_planning_without_waiting_for_ik(rig):
-    import threading
-
-    e, clock = rig
+    e, _ = rig
     lease = e.acquire("a")
     planning = threading.Event()
     resume = threading.Event()
@@ -233,7 +232,7 @@ def test_replay_without_lease_is_rejected(rig):
 
 
 def test_ledger_evicts_finished_operations_and_keeps_active(rig):
-    e, c = rig
+    e, _ = rig
     lease = e.acquire("agent")
     for i in range(10000):
         e.operations[("agent", f"old{i}")] = {

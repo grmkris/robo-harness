@@ -4,10 +4,12 @@ import argparse
 import base64
 import hmac
 import io
+import logging
 import os
 import tempfile
 import threading
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, Request
@@ -15,8 +17,13 @@ from fastapi.responses import JSONResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
+# Worker input guards.
+MAX_RESOLUTION = 2048
+MASK_THRESHOLD = 0.5
+MIN_TOKEN_LENGTH = 24
 
-def png(image):
+
+def png(image: Image.Image) -> str:
     output = io.BytesIO()
     image.save(output, format="PNG")
     return base64.b64encode(output.getvalue()).decode()
@@ -29,13 +36,13 @@ class Inference(BaseModel):
 
 
 class Models:
-    def __init__(self):
-        self.segment = None
-        self.depth = None
+    def __init__(self) -> None:
+        self.segment: Any = None
+        self.depth: Any = None
         self.lock = threading.Lock()
 
-    def infer(self, request):
-        import torch
+    def infer(self, request: Inference) -> dict[str, Any]:
+        import torch  # noqa: PLC0415
 
         if not torch.cuda.is_available():
             raise RuntimeError("This worker requires a CUDA GPU; no silent CPU fallback")
@@ -44,13 +51,13 @@ class Models:
         if len(raw) > 8 * 1024 * 1024:
             raise ValueError("Input image is too large")
         image = Image.open(io.BytesIO(raw)).convert("RGB")
-        if max(image.size) > 2048:
+        if max(image.size) > MAX_RESOLUTION:
             raise ValueError("Input resolution exceeds worker limit")
         base = {"frame_id": frame["id"], "kind": request.kind, "width": image.width, "height": image.height}
         with self.lock, torch.inference_mode():
             if request.kind == "segment":
-                from sam3.model.sam3_image_processor import Sam3Processor
-                from sam3.model_builder import build_sam3_image_model
+                from sam3.model.sam3_image_processor import Sam3Processor  # noqa: PLC0415
+                from sam3.model_builder import build_sam3_image_model  # noqa: PLC0415
 
                 checkpoint = os.environ.get("SAM3_CHECKPOINT")
                 if not checkpoint:
@@ -63,12 +70,14 @@ class Models:
                 scores = result["scores"].detach().cpu().numpy()
                 overlay = np.array(image).copy()
                 output = []
-                for mask, score in zip(masks[:16], scores[:16]):
-                    mask = np.squeeze(mask) > 0.5
-                    overlay[mask] = (overlay[mask] * 0.5 + np.array([120, 210, 160]) * 0.5).astype(np.uint8)
+                for mask, score in zip(masks[:16], scores[:16], strict=False):
+                    binary = np.squeeze(mask) > MASK_THRESHOLD
+                    overlay[binary] = (overlay[binary] * 0.5 + np.array([120, 210, 160]) * 0.5).astype(
+                        np.uint8
+                    )
                     output.append(
                         {
-                            "png": png(Image.fromarray(mask.astype(np.uint8) * 255)),
+                            "png": png(Image.fromarray(binary.astype(np.uint8) * 255)),
                             "label": request.prompt,
                             "score": float(score),
                         }
@@ -82,7 +91,7 @@ class Models:
                     "units": "pixels",
                 }
             if request.kind == "depth":
-                from depth_anything_3.api import DepthAnything3
+                from depth_anything_3.api import DepthAnything3  # noqa: PLC0415
 
                 checkpoint = os.environ.get("DA3_CHECKPOINT")
                 if not checkpoint:
@@ -117,10 +126,10 @@ class Models:
             raise ValueError("Unknown perception capability")
 
 
-def create_app():
+def create_app() -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     token = os.environ.get("ROBO_PERCEPTION_TOKEN", "")
-    if len(token) < 24:
+    if len(token) < MIN_TOKEN_LENGTH:
         raise ValueError("ROBO_PERCEPTION_TOKEN must have at least 24 characters")
     models = Models()
 
@@ -146,9 +155,10 @@ def create_app():
     return app
 
 
-def main():
-    import uvicorn
+def main() -> None:
+    import uvicorn  # noqa: PLC0415
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8790)

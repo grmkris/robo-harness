@@ -1,8 +1,11 @@
 import json
+import threading
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from robo_harness.drivers import LeRobotDriver, MockDriver
 from robo_harness.service import create_app
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,9 +47,6 @@ def test_auth_and_schema_and_mock():
 
 
 def test_real_driver_requires_commissioning():
-    import pytest
-    from robo_harness.drivers import LeRobotDriver
-
     with pytest.raises(ValueError, match="commissioned"):
         LeRobotDriver({"commissioned": False})
 
@@ -54,10 +54,6 @@ def test_real_driver_requires_commissioning():
 def test_leader_connect_does_not_block_observe(monkeypatch):
     """Connecting a leader must not hold engine.lock: /observe stays responsive
     while the (blocking) serial connect is in progress."""
-    import threading
-
-    from robo_harness.drivers import MockDriver
-
     started = threading.Event()
     release = threading.Event()
 

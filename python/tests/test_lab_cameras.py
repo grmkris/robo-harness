@@ -1,11 +1,14 @@
 import base64
 import sys
+import threading
 import time
+from collections import OrderedDict
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from robo_harness import service
 from robo_harness.cameras import Cameras
 from robo_harness.service import create_app
 
@@ -58,8 +61,6 @@ def test_lab_camera_preserves_capture_provenance_without_duplicating_frames(monk
 
 
 def test_motor_startup_failure_releases_camera_ownership(monkeypatch):
-    import robo_harness.service as service
-
     events = []
     monkeypatch.setattr(service, "Kinematics", lambda *args: object())
     monkeypatch.setattr(
@@ -70,18 +71,17 @@ def test_motor_startup_failure_releases_camera_ownership(monkeypatch):
         raise ValueError("Calibration mismatch")
 
     monkeypatch.setattr(service, "LeRobotDriver", fail)
-    with pytest.raises(ValueError, match="Calibration mismatch"):
-        with TestClient(create_app({"backend": "so101", "urdf": "unused"}, "a-test-credential-long-enough")):
-            pass
+    with (
+        pytest.raises(ValueError, match="Calibration mismatch"),
+        TestClient(create_app({"backend": "so101", "urdf": "unused"}, "a-test-credential-long-enough")),
+    ):
+        pass
     assert events == ["closed"]
 
 
 def test_device_camera_read_failure_recovers(monkeypatch):
     """A read failure in `devices` mode must not kill the capture thread: it
     drops the handle, reopens, and resumes producing frames."""
-    import threading
-    from collections import OrderedDict
-
     mjpg = ord("M") | (ord("J") << 8) | (ord("P") << 16) | (ord("G") << 24)
     reads = {"n": 0}
     opened = []

@@ -6,21 +6,30 @@ import io
 import threading
 import time
 from collections import OrderedDict
+from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw
 
+# Retain at most this many recent frames across all cameras for replay-by-id lookups.
+HISTORY_LIMIT = 240
+# A live frame older than this many milliseconds is considered stale.
+STALE_AGE_MS = 500
+
 
 class Cameras:
-    def __init__(self, profile, domain):
+    def __init__(self, profile: dict[str, Any], domain: str) -> None:
         self.profile, self.domain = profile, domain
         self.lock = threading.Lock()
-        self.frames, self.history, self.errors = {}, OrderedDict(), {}
+        self.frames: dict[str, dict[str, Any]] = {}
+        self.history: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self.errors: dict[str, str] = {}
         self.closed = threading.Event()
         self.seq = {"workspace": 0, "wrist": 0}
-        self._file = None
-        self.owner = None
+        self._file: Any = None
+        self.owner: Any = None
         if profile["camera_mode"] == "lab":
-            from lab_cameras import CameraOwner
+            from lab_cameras import CameraOwner  # noqa: PLC0415
 
             self.owner = CameraOwner(
                 cameras=profile["camera_devices"],
@@ -29,7 +38,7 @@ class Cameras:
             ).__enter__()
         if profile["camera_mode"] == "devices":
             # Same lock as SO101-lab. Existing labcam-preview must be stopped at reviewed deployment.
-            self._file = open("/run/lock/lab-cams.lock", "a")
+            self._file = Path("/run/lock/lab-cams.lock").open("a")  # noqa: SIM115 (long-lived flock handle)
             fcntl.flock(self._file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.threads = [
             threading.Thread(target=self._capture, args=(name,), daemon=True, name=f"camera-{name}")
@@ -38,7 +47,7 @@ class Cameras:
         for t in self.threads:
             t.start()
 
-    def _capture_lab(self, name):
+    def _capture_lab(self, name: str) -> None:
         while not self.closed.wait(0.025):
             try:
                 source = self.owner.latest(name, max_age_ms=500)
@@ -62,7 +71,7 @@ class Cameras:
                     self.seq[name] = source.seq
                     self.frames[name] = frame
                     self.history[frame["id"]] = frame
-                    while len(self.history) > 240:
+                    while len(self.history) > HISTORY_LIMIT:
                         self.history.popitem(last=False)
                     self.errors.pop(name, None)
             except Exception as e:
@@ -70,8 +79,8 @@ class Cameras:
                     self.errors[name] = str(e)
                 self.closed.wait(0.1)
 
-    def _open_device(self, name):
-        import cv2
+    def _open_device(self, name: str) -> Any:
+        import cv2  # noqa: PLC0415
 
         cap = cv2.VideoCapture(self.profile["camera_devices"][name], cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -91,7 +100,7 @@ class Cameras:
             raise RuntimeError(f"Camera did not accept MJPG (reported {got!r})")
         return cap
 
-    def _capture(self, name):
+    def _capture(self, name: str) -> None:
         if self.owner is not None:
             self._capture_lab(name)
             return
@@ -114,7 +123,7 @@ class Cameras:
                                 self.errors[name] = str(e)
                             self.closed.wait(1.0)
                             continue
-                    import cv2
+                    import cv2  # noqa: PLC0415
 
                     ok, bgr = cap.read()
                     mono, wall = time.monotonic(), time.time() * 1000
@@ -166,7 +175,7 @@ class Cameras:
                 with self.lock:
                     self.frames[name] = frame
                     self.history[frame["id"]] = frame
-                    while len(self.history) > 240:
+                    while len(self.history) > HISTORY_LIMIT:
                         self.history.popitem(last=False)
                     self.errors.pop(name, None)
         except Exception as e:
@@ -176,17 +185,17 @@ class Cameras:
             if cap:
                 cap.release()
 
-    def get(self, name, frame_id=None):
+    def get(self, name: str, frame_id: str | None = None) -> dict[str, Any]:
         with self.lock:
             f = self.history.get(frame_id) if frame_id else self.frames.get(name)
             if not f or f["camera"] != name:
                 raise ValueError("Camera frame is unavailable or has expired")
             out = {**f, "age_ms": (time.monotonic() - f["monotonic_s"]) * 1000}
-        if not frame_id and out["age_ms"] > 500:
+        if not frame_id and out["age_ms"] > STALE_AGE_MS:
             raise ValueError("Camera is stale")
         return out
 
-    def status(self):
+    def status(self) -> dict[str, dict[str, Any]]:
         with self.lock:
             return {
                 name: {
@@ -199,7 +208,7 @@ class Cameras:
                 for name in self.seq
             }
 
-    def close(self):
+    def close(self) -> None:
         self.closed.set()
         for t in self.threads:
             t.join(timeout=2)

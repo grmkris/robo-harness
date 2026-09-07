@@ -32,6 +32,7 @@ def test_service_announces_ephemeral_port():
         stderr=subprocess.DEVNULL,
         text=True,
     )
+    assert proc.stdout is not None
     try:
         deadline = time.time() + 15
         announced = None

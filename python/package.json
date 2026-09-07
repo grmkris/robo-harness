@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "lint": "uv run ruff check python",
-    "typecheck": "echo 'pyright runs in Phase 5'",
+    "format:check": "uv run ruff format --check python",
+    "typecheck": "uv run pyright",
     "test": "uv run --extra dev pytest"
   }
 }

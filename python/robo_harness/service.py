@@ -3,6 +3,7 @@
 import argparse
 import hmac
 import json
+import logging
 import os
 import socket
 import threading
@@ -10,6 +11,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -19,6 +21,12 @@ from .cameras import Cameras
 from .drivers import LeRobotDriver, MockDriver
 from .engine import ControlError, Engine
 from .kinematics import Kinematics
+
+# Auth and request guards.
+MIN_TOKEN_LENGTH = 24
+MAX_CONTENT_LENGTH = 65536
+# A camera frame older than this many milliseconds bars an agent from holding control.
+CAMERA_STALE_MS = 500
 
 
 class Acquire(BaseModel):
@@ -41,16 +49,18 @@ class Move(Lease):
     duration_s: float = 1.0
 
 
-def create_app(profile: dict, token: str, run_loop=True):
-    if len(token) < 24:
+def create_app(profile: dict[str, Any], token: str, run_loop: bool = True) -> FastAPI:
+    if len(token) < MIN_TOKEN_LENGTH:
         raise ValueError("ROBO_IO_TOKEN must have at least 24 characters")
-    engine = None
-    cameras = None
+    # Populated by the lifespan handler before any request is served; typed as the
+    # concrete owners so endpoints check against them without per-call narrowing.
+    engine = cast("Engine", None)
+    cameras = cast("Cameras", None)
     stop = threading.Event()
-    thread = None
+    thread: threading.Thread | None = None
 
     @asynccontextmanager
-    async def lifespan(app):
+    async def lifespan(app: FastAPI):
         nonlocal engine, cameras, thread
         # Validate geometry and acquire cameras before enabling motor torque.
         kin = Kinematics(profile["urdf"], profile.get("joint_offsets_deg"))
@@ -66,7 +76,7 @@ def create_app(profile: dict, token: str, run_loop=True):
                 driver.close()
             raise
         engine.observation_guard = lambda: all(
-            s["age_ms"] is not None and s["age_ms"] < 500 and not s["error"]
+            s["age_ms"] is not None and s["age_ms"] < CAMERA_STALE_MS and not s["error"]
             for s in cameras.status().values()
         )
 
@@ -106,7 +116,7 @@ def create_app(profile: dict, token: str, run_loop=True):
                 length = int(raw_length)
             except ValueError:
                 return JSONResponse({"error": "Invalid Content-Length"}, status_code=400)
-            if length > 65536:
+            if length > MAX_CONTENT_LENGTH:
                 return JSONResponse({"error": "Request too large"}, status_code=413)
         return await call_next(request)
 
@@ -175,9 +185,10 @@ def create_app(profile: dict, token: str, run_loop=True):
     return app
 
 
-def main():
-    import uvicorn
+def main() -> None:
+    import uvicorn  # noqa: PLC0415
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", default="config/robot.example.json")
     parser.add_argument("--host", default="127.0.0.1")
@@ -195,7 +206,9 @@ def main():
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((args.host, args.port))
     bound_host, bound_port = sock.getsockname()[:2]
-    print(
+    # Machine-readable protocol line read by tests and the TS harness: keep it a
+    # plain stdout write, never a logging call.
+    print(  # noqa: T201
         json.dumps({"event": "listening", "host": bound_host, "port": bound_port}),
         flush=True,
     )

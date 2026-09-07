@@ -1,11 +1,15 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import rerun as rr
 from robo_harness.dataset import resample
 from robo_harness.drivers import MockDriver
 from robo_harness.engine import Engine
 from robo_harness.kinematics import Kinematics
+from robo_harness.perception import create_app
 from robo_harness.telemetry import initialize, log_observation
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,11 +23,6 @@ def test_resampling_preserves_real_time_and_rejects_gaps():
 
 
 def test_rerun_writes_readable_recording(tmp_path):
-    import subprocess
-    import sys
-
-    import rerun as rr
-
     profile = json.loads((ROOT / "config/robot.example.json").read_text())
     engine = Engine(MockDriver(), profile, Kinematics(str(ROOT / "assets/so101.urdf")))
     stream = rr.RecordingStream("robo-test")
@@ -39,13 +38,12 @@ def test_rerun_writes_readable_recording(tmp_path):
         [str(Path(sys.executable).with_name("rerun")), "rrd", "verify", str(path)],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert checked.returncode == 0, checked.stderr
 
 
 def test_worker_rejects_missing_auth(monkeypatch):
-    from robo_harness.perception import create_app
-
     monkeypatch.delenv("ROBO_PERCEPTION_TOKEN", raising=False)
     with pytest.raises(ValueError, match="TOKEN"):
         create_app()

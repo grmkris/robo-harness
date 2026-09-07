@@ -4,6 +4,7 @@ import argparse
 import base64
 import io
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -11,6 +12,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import httpx
 import numpy as np
@@ -18,8 +20,16 @@ import rerun as rr
 import rerun.blueprint as rrb
 from PIL import Image
 
+logger = logging.getLogger(__name__)
 
-def blueprint():
+MIN_TOKEN_LENGTH = 24
+# Observations older than this many milliseconds when received are dropped as stale.
+FRESH_WINDOW_MS = 1000
+# Throttle live-view camera logging to at most one frame per this many seconds.
+LIVE_CAMERA_INTERVAL_S = 0.33
+
+
+def blueprint() -> rrb.Blueprint:
     return rrb.Blueprint(
         rrb.Horizontal(
             rrb.Vertical(
@@ -41,7 +51,7 @@ def blueprint():
     )
 
 
-def initialize(stream):
+def initialize(stream: Any) -> None:
     rr.send_blueprint(blueprint(), recording=stream)
     stream.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
     stream.log("world/origin", rr.Transform3D(translation=[0, 0, 0]), static=True)
@@ -52,7 +62,7 @@ def initialize(stream):
     stream.log("world/grid", rr.LineStrips3D(lines, colors=[70, 83, 75], radii=0.0004), static=True)
 
 
-def log_observation(stream, observation):
+def log_observation(stream: Any, observation: dict[str, Any]) -> None:
     stream.set_time("capture", timestamp=observation["wall_time_ms"] / 1000)
     stream.set_time("device_sequence", sequence=observation["seq"])
     stream.log("metadata/calibration", rr.TextDocument(observation["calibration_id"]))
@@ -85,7 +95,7 @@ def log_observation(stream, observation):
     )
 
 
-def log_frame(stream, frame):
+def log_frame(stream: Any, frame: dict[str, Any]) -> None:
     stream.set_time("capture", timestamp=frame["wall_time_ms"] / 1000)
     stream.set_time("device_sequence", sequence=frame["seq"])
     path = "cameras/" + frame["camera"]
@@ -103,7 +113,7 @@ def log_frame(stream, frame):
         )
 
 
-def log_perception(stream, result):
+def log_perception(stream: Any, result: dict[str, Any]) -> None:
     source = result["source"]
     stream.set_time("capture", timestamp=source["wall_time_ms"] / 1000)
     stream.log(
@@ -136,14 +146,15 @@ def log_perception(stream, result):
         stream.log(f"perception/mask_{i}", rr.SegmentationImage((image > 0).astype(np.uint8)))
 
 
-def main():
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=os.environ.get("ROBO_URL", "http://127.0.0.1:8940"))
     parser.add_argument("--web-port", type=int, default=8942)
     parser.add_argument("--grpc-port", type=int, default=8943)
     args = parser.parse_args()
     token = os.environ.get("ROBO_WORKER_TOKEN", "")
-    if len(token) < 24:
+    if len(token) < MIN_TOKEN_LENGTH:
         parser.error("ROBO_WORKER_TOKEN is required")
     data = Path(os.environ.get("ROBO_DATA_DIR", "var")).resolve()
     # Python serve_grpc has no bind argument; use the CLI to enforce loopback-only listeners.
@@ -208,7 +219,7 @@ def main():
                             initialize(saved)
                     streams = [live] + ([saved] if saved else [])
                     obs = packet.get("observation")
-                    if obs and time.time() * 1000 - packet.get("received_at", 0) < 1000:
+                    if obs and time.time() * 1000 - packet.get("received_at", 0) < FRESH_WINDOW_MS:
                         key = (obs["boot_id"], obs["seq"])
                         if key != last_seq:
                             if last_seq and last_seq[0] == key[0]:
@@ -223,7 +234,7 @@ def main():
                         if seen_frames.get(name) != frame["id"]:
                             if saved:
                                 log_frame(saved, frame)
-                            if time.monotonic() - camera_logged_at.get(name, 0) >= 0.33:
+                            if time.monotonic() - camera_logged_at.get(name, 0) >= LIVE_CAMERA_INTERVAL_S:
                                 log_frame(live, frame)
                                 camera_logged_at[name] = time.monotonic()
                             seen_frames[name] = frame["id"]
@@ -254,7 +265,7 @@ def main():
                             },
                         )
                     except Exception:
-                        pass
+                        logger.debug("Telemetry heartbeat POST failed", exc_info=True)
                     last_heartbeat = time.monotonic()
                 time.sleep(max(0, 0.1 - (time.monotonic() - started)))
         finally:

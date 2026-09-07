@@ -2,6 +2,7 @@
 
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -10,20 +11,33 @@ from scipy.spatial.transform import Rotation
 ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
 JOINTS = (*ARM_JOINTS, "gripper")
 
+# End effector must land within this distance of the Cartesian target to count as reached.
+IK_TOLERANCE_M = 0.003
+# Below this the segment is treated as parallel to a slab face in the keep-out test.
+PARALLEL_EPS = 1e-12
+
+
+def _require(element: "ET.Element | None") -> ET.Element:
+    """Narrow an ElementTree lookup to non-optional without changing runtime behavior.
+
+    A missing element still surfaces the same AttributeError downstream as before.
+    """
+    return cast("ET.Element", element)
+
 
 class Kinematics:
-    def __init__(self, path: str, offsets: dict | None = None):
+    def __init__(self, path: str, offsets: dict[str, float] | None = None) -> None:
         root = ET.parse(Path(path)).getroot()
         self.joints = list(root.findall("joint"))
         self.offsets = offsets or {}
 
-    def frames(self, angles: dict) -> dict:
-        frames = {"base_link": np.eye(4)}
+    def frames(self, angles: dict[str, float]) -> dict[str, np.ndarray]:
+        frames: dict[str, np.ndarray] = {"base_link": np.eye(4)}
         pending = self.joints.copy()
         while pending:
             progressed = False
             for joint in pending[:]:
-                parent = joint.find("parent").attrib["link"]
+                parent = _require(joint.find("parent")).attrib["link"]
                 if parent not in frames:
                     continue
                 origin = joint.find("origin")
@@ -33,31 +47,33 @@ class Kinematics:
                     t[:3, :3] = Rotation.from_euler(
                         "xyz", np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
                     ).as_matrix()
-                name = joint.get("name")
+                name = cast("str", joint.get("name"))
                 if joint.get("type") in ("revolute", "continuous") and name != "gripper":
-                    axis = np.fromstring(joint.find("axis").get("xyz"), sep=" ")
+                    axis = np.fromstring(cast("str", _require(joint.find("axis")).get("xyz")), sep=" ")
                     turn = np.eye(4)
                     turn[:3, :3] = Rotation.from_rotvec(
                         axis * np.deg2rad(angles.get(name, 0) + self.offsets.get(name, 0))
                     ).as_matrix()
                     t = t @ turn
-                frames[joint.find("child").get("link")] = frames[parent] @ t
+                frames[cast("str", _require(joint.find("child")).get("link"))] = frames[parent] @ t
                 pending.remove(joint)
                 progressed = True
             if not progressed:
                 raise ValueError("URDF has an unresolved frame graph")
         return frames
 
-    def xyz(self, angles: dict) -> np.ndarray:
+    def xyz(self, angles: dict[str, float]) -> np.ndarray:
         return self.frames(angles)["gripper_frame_link"][:3, 3]
 
-    def inverse(self, current: dict, target: list, limits: dict) -> dict:
+    def inverse(
+        self, current: dict[str, float], target: list[float], limits: dict[str, tuple[float, float]]
+    ) -> dict[str, float]:
         start = np.array([current[j] for j in ARM_JOINTS])
-        target = np.asarray(target, dtype=float)
+        goal = np.asarray(target, dtype=float)
 
-        def residual(q):
-            pose = {**current, **dict(zip(ARM_JOINTS, q))}
-            return np.concatenate(((self.xyz(pose) - target) * 100, (q - start) * 0.0001))
+        def residual(q: np.ndarray) -> np.ndarray:
+            pose = {**current, **dict(zip(ARM_JOINTS, q, strict=True))}
+            return np.concatenate(((self.xyz(pose) - goal) * 100, (q - start) * 0.0001))
 
         solved = least_squares(
             residual,
@@ -65,19 +81,20 @@ class Kinematics:
             bounds=([limits[j][0] for j in ARM_JOINTS], [limits[j][1] for j in ARM_JOINTS]),
             max_nfev=120,
         )
-        out = {**current, **dict(zip(ARM_JOINTS, solved.x.tolist()))}
-        if np.linalg.norm(self.xyz(out) - target) > 0.003:
+        out = {**current, **dict(zip(ARM_JOINTS, solved.x.tolist(), strict=True))}
+        if np.linalg.norm(self.xyz(out) - goal) > IK_TOLERANCE_M:
             raise ValueError("Cartesian target is unreachable within 3 mm")
         return out
 
-    def validate(self, angles: dict, profile: dict):
+    def validate(self, angles: dict[str, float], profile: dict) -> None:
         frames = self.frames(angles)
         ee = self.xyz(angles)
         if np.any(ee < profile["workspace_min"]) or np.any(ee > profile["workspace_max"]):
             raise ValueError("End effector is outside the commissioned workspace")
         radius = profile.get("link_radius_m", 0.015)
         for joint in self.joints:
-            parent, child = joint.find("parent").get("link"), joint.find("child").get("link")
+            parent = cast("str", _require(joint.find("parent")).get("link"))
+            child = cast("str", _require(joint.find("child")).get("link"))
             a, b = frames[parent][:3, 3], frames[child][:3, 3]
             if parent != "base_link" and min(a[2], b[2]) - radius < profile["table_z_m"]:
                 raise ValueError("Arm geometry intersects the configured table clearance")
@@ -87,7 +104,7 @@ class Kinematics:
                 tmin, tmax = 0.0, 1.0
                 for k in range(3):
                     delta = b[k] - a[k]
-                    if abs(delta) < 1e-12:
+                    if abs(delta) < PARALLEL_EPS:
                         if a[k] < lo[k] or a[k] > hi[k]:
                             tmin, tmax = 1.0, 0.0
                             break

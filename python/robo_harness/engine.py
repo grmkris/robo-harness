@@ -1,42 +1,62 @@
 """Single-writer control state machine; no camera, inference, storage, or network I/O here."""
 
+import contextlib
 import copy
 import math
 import threading
 import time
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
+from typing import Any, cast
 
 from .kinematics import JOINTS
 
+# The control loop must observe and command within this deadline or the lease is dropped.
+CONTROL_DEADLINE_S = 0.25
+MAX_REQUEST_ID = 128
+MIN_DURATION_S = 0.1
+MAX_DURATION_S = 10
+CARTESIAN_DIMS = 3
+# A measured drift beyond this between plan and commit means the robot moved; replan.
+REPLAN_DRIFT = 0.5
+# Cap on retained operations before finished ones are evicted from the ledger.
+MAX_OPERATIONS = 10000
+
 
 class ControlError(Exception):
-    def __init__(self, message, status=409):
+    def __init__(self, message: str, status: int = 409) -> None:
         super().__init__(message)
         self.status = status
 
 
 class Engine:
-    def __init__(self, driver, profile, kinematics, clock=time.monotonic):
+    def __init__(
+        self,
+        driver: Any,
+        profile: dict[str, Any],
+        kinematics: Any,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.driver, self.profile, self.kin, self.clock = driver, profile, kinematics, clock
         self.lock = threading.RLock()
         self.boot_id = str(uuid.uuid4())
-        self.measured = driver.read()
-        self.commanded = self.measured.copy()
-        self.lease = None
-        self.operation = None
-        self.operations = OrderedDict()
-        self.fault = None
+        self.measured: dict[str, float] = driver.read()
+        self.commanded: dict[str, float] = self.measured.copy()
+        self.lease: dict[str, Any] | None = None
+        self.operation: dict[str, Any] | None = None
+        self.operations: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
+        self.fault: str | None = None
         self.seq = 0
         self.last_observed = clock()
         self.last_wall_ms = time.time() * 1000
         self.last_tick = clock()
-        self.leader = None
-        self.observation_guard = lambda: True
-        self.trajectory = []
+        self.leader: Any = None
+        self.observation_guard: Callable[[], bool] = lambda: True
+        self.trajectory: list[list[float]] = []
         self.profile["limits"] = {j: profile["limits"][j] for j in JOINTS}
 
-    def observe(self):
+    def observe(self) -> dict[str, Any]:
         with self.lock:
             now = self.clock()
             lease = self.lease
@@ -51,7 +71,7 @@ class Engine:
                 "age_ms": (now - self.last_observed) * 1000,
                 "backend": self.profile["backend"],
                 "calibration_id": self.profile["calibration_id"],
-                "units": {**{j: "degrees" for j in JOINTS[:-1]}, "gripper": "percent"},
+                "units": {**dict.fromkeys(JOINTS[:-1], "degrees"), "gripper": "percent"},
                 "measured": self.measured.copy(),
                 "commanded": self.commanded.copy(),
                 "ee": self.kin.xyz(self.measured).tolist(),
@@ -72,7 +92,7 @@ class Engine:
                 or self.profile.get("cartesian_reviewed", False),
             }
 
-    def acquire(self, owner, mode="agent", takeover=False):
+    def acquire(self, owner: str, mode: str = "agent", takeover: bool = False) -> dict[str, Any]:
         if mode not in ("human", "agent", "leader"):
             raise ControlError("Unknown controller mode", 400)
         with self.lock:
@@ -89,15 +109,16 @@ class Engine:
             self.lease = {"id": str(uuid.uuid4()), "owner": owner, "mode": mode, "expires": self.clock() + 3}
             return self._lease_reply()
 
-    def _lease_reply(self):
+    def _lease_reply(self) -> dict[str, Any]:
+        lease = cast("dict[str, Any]", self.lease)
         return {
-            "lease_id": self.lease["id"],
+            "lease_id": lease["id"],
             "ttl_ms": 3000,
-            "owner": self.lease["owner"],
-            "mode": self.lease["mode"],
+            "owner": lease["owner"],
+            "mode": lease["mode"],
         }
 
-    def _check_lease(self, lease_id, owner):
+    def _check_lease(self, lease_id: str, owner: str) -> None:
         if (
             not self.lease
             or self.lease["id"] != lease_id
@@ -105,40 +126,47 @@ class Engine:
             or self.lease["expires"] <= self.clock()
         ):
             raise ControlError("Control lease is absent, expired, or belongs to another controller")
-        if self.fault or self.clock() - self.last_observed > 0.25:
+        if self.fault or self.clock() - self.last_observed > CONTROL_DEADLINE_S:
             raise ControlError("Robot observation is stale or faulted")
 
-    def renew(self, lease_id, owner):
+    def renew(self, lease_id: str, owner: str) -> dict[str, Any]:
         with self.lock:
             self._check_lease(lease_id, owner)
-            self.lease["expires"] = self.clock() + 3
+            cast("dict[str, Any]", self.lease)["expires"] = self.clock() + 3
             return self._lease_reply()
 
-    def release(self, lease_id, owner):
+    def release(self, lease_id: str, owner: str) -> None:
         with self.lock:
             self._check_lease(lease_id, owner)
             self._stop("Controller released")
             self.lease = None
 
-    def stop(self, reason="Stopped by operator"):
+    def stop(self, reason: str = "Stopped by operator") -> dict[str, Any]:
         with self.lock:
             self._stop(reason)
             self.lease = None
             return self.observe()
 
-    def _stop(self, reason):
+    def _stop(self, reason: str) -> None:
         if self.operation and self.operation["status"] in ("accepted", "running"):
             self.operation.update(status="cancelled", reason=reason, finished_ms=time.time() * 1000)
         # Hold the last commanded position, not the sagged measured position.
         self.trajectory = []
         if self.leader:
-            try:
+            with contextlib.suppress(Exception):
                 self.leader.close()
-            except Exception:
-                pass
             self.leader = None
 
-    def submit(self, request_id, lease_id, owner, target=None, xyz=None, duration_s=1.0):
+    def submit(
+        self,
+        request_id: str,
+        lease_id: str,
+        owner: str,
+        *,
+        target: dict[str, float] | None = None,
+        xyz: list[float] | None = None,
+        duration_s: float = 1.0,
+    ) -> dict[str, Any]:
         with self.lock:
             key = (owner, request_id)
             signature = (target, xyz, duration_s)
@@ -150,22 +178,22 @@ class Engine:
                 if old["_signature"] != signature:
                     raise ControlError("Request ID was reused with different motion")
                 return self._public(old)
-            if self.lease["mode"] == "leader":
+            if cast("dict[str, Any]", self.lease)["mode"] == "leader":
                 raise ControlError("Leader teleoperation owns motion")
-            if not request_id or len(request_id) > 128:
+            if not request_id or len(request_id) > MAX_REQUEST_ID:
                 raise ControlError("A bounded request ID is required", 400)
             if self.operation and self.operation["status"] in ("accepted", "running"):
                 raise ControlError("A motion is already running")
             start = self.measured.copy()
         # Trajectory planning must never hold the motor-thread mutex.
-        if not math.isfinite(duration_s) or not 0.1 <= duration_s <= 10:
+        if not math.isfinite(duration_s) or not MIN_DURATION_S <= duration_s <= MAX_DURATION_S:
             raise ControlError("Duration must be between 0.1 and 10 seconds", 400)
         if (target is None) == (xyz is None):
             raise ControlError("Specify joints or Cartesian target, exclusively", 400)
         if xyz is not None:
             if not (self.profile["backend"] == "mock" or self.profile.get("cartesian_reviewed")):
                 raise ControlError("Cartesian calibration has not been reviewed")
-            if len(xyz) != 3 or not all(math.isfinite(v) for v in xyz):
+            if len(xyz) != CARTESIAN_DIMS or not all(math.isfinite(v) for v in xyz):
                 raise ControlError("Cartesian target must contain three finite meters", 400)
             try:
                 target = self.kin.inverse(start, xyz, self.profile["limits"])
@@ -205,12 +233,12 @@ class Engine:
                 return self._public(old)
             if self.operation and self.operation["status"] in ("accepted", "running"):
                 raise ControlError("A motion is already running")
-            if any(abs(self.measured[j] - start[j]) > 0.5 for j in JOINTS):
+            if any(abs(self.measured[j] - start[j]) > REPLAN_DRIFT for j in JOINTS):
                 raise ControlError("Robot moved while planning; observe and replan")
-            if len(self.operations) >= 10000:
+            if len(self.operations) >= MAX_OPERATIONS:
                 # Evict the oldest finished operations, never the active one.
                 for old_key in list(self.operations):
-                    if len(self.operations) < 10000:
+                    if len(self.operations) < MAX_OPERATIONS:
                         break
                     entry = self.operations[old_key]
                     if entry is not self.operation and entry["status"] not in (
@@ -235,7 +263,7 @@ class Engine:
             self.trajectory = samples
             return self._public(self.operation)
 
-    def get_operation(self, operation_id):
+    def get_operation(self, operation_id: str) -> dict[str, Any]:
         with self.lock:
             for op in self.operations.values():
                 if op["id"] == operation_id:
@@ -243,10 +271,10 @@ class Engine:
         raise ControlError("Operation not found in this service boot", 404)
 
     @staticmethod
-    def _public(op):
+    def _public(op: dict[str, Any]) -> dict[str, Any]:
         return copy.deepcopy({k: v for k, v in op.items() if not k.startswith("_")})
 
-    def tick(self):
+    def tick(self) -> None:
         with self.lock:
             now = self.clock()
             dt = min(max(now - self.last_tick, 0), 0.1)
@@ -259,7 +287,7 @@ class Engine:
                 self.last_observed = now
                 self.last_wall_ms = time.time() * 1000
                 self.seq += 1
-                if gap > 0.25 and self.lease:
+                if gap > CONTROL_DEADLINE_S and self.lease:
                     self._stop("Control loop deadline missed")
                     self.lease = None
                 if self.lease and self.lease["expires"] <= now:

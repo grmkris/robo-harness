@@ -3,26 +3,30 @@
 import fcntl
 import os
 from pathlib import Path
+from typing import Any
 
 from .kinematics import JOINTS
 
+# A startup recovery nudge may move an out-of-range joint at most this many degrees.
+MAX_RECOVERY_DEGREES = 2
+
 
 class MockDriver:
-    def __init__(self):
-        self.q = {j: 0.0 for j in JOINTS}
+    def __init__(self) -> None:
+        self.q: dict[str, float] = dict.fromkeys(JOINTS, 0.0)
         self.q["gripper"] = 40.0
 
-    def read(self):
+    def read(self) -> dict[str, float]:
         return self.q.copy()
 
-    def write(self, values):
+    def write(self, values: dict[str, float]) -> None:
         self.q = values.copy()
 
-    def close(self):
+    def close(self) -> None:
         pass
 
 
-def configure_follower_with_hold(bus, recovery_targets=None):
+def configure_follower_with_hold(bus: Any, recovery_targets: dict[str, int] | None = None) -> None:
     """LeRobot 0.6 follower settings, with a current-position goal before torque.
 
     A configuration failure leaves torque disabled. The standard context manager
@@ -49,7 +53,7 @@ def configure_follower_with_hold(bus, recovery_targets=None):
         calibration = bus.calibration[name]
         if calibration.range_min <= positions[name] <= calibration.range_max:
             raise ValueError("Startup recovery only applies to an out-of-range rest pose")
-        if not isinstance(target, int) or abs(target - positions[name]) * 360 / 4095 > 2:
+        if not isinstance(target, int) or abs(target - positions[name]) * 360 / 4095 > MAX_RECOVERY_DEGREES:
             raise ValueError("Startup recovery is limited to two degrees")
         goals[name] = target
     for name, value in goals.items():
@@ -63,7 +67,7 @@ def configure_follower_with_hold(bus, recovery_targets=None):
 
 
 class LeRobotDriver:
-    def __init__(self, profile, leader=False):
+    def __init__(self, profile: dict[str, Any], leader: bool = False) -> None:
         if (
             not profile.get("commissioned")
             or not profile.get("profile_review")
@@ -74,11 +78,12 @@ class LeRobotDriver:
         # hazards): prefer the per-user runtime dir, fall back to /run/lock.
         lock_dir = os.environ.get("XDG_RUNTIME_DIR") or "/run/lock"
         lock_name = "robo-harness-leader.lock" if leader else "robo-harness-follower.lock"
-        self._lock = open(Path(lock_dir) / lock_name, "w")
+        # Long-lived flock handle, deliberately not context-managed.
+        self._lock = (Path(lock_dir) / lock_name).open("w")
         fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.is_leader = leader
         if leader:
-            from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig
+            from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig  # noqa: PLC0415
 
             cfg = SO101LeaderConfig(
                 port=profile["leader_port"],
@@ -88,7 +93,7 @@ class LeRobotDriver:
             )
             self.robot = SO101Leader(cfg)
         else:
-            from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
+            from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig  # noqa: PLC0415
 
             cfg = SO101FollowerConfig(
                 port=profile["port"],
@@ -122,13 +127,13 @@ class LeRobotDriver:
             self._lock.close()
             raise
 
-    def read(self):
+    def read(self) -> dict[str, float]:
         obs = self.robot.get_action() if self.is_leader else self.robot.get_observation()
         return {j: float(obs[f"{j}.pos"]) for j in JOINTS}
 
-    def write(self, values):
+    def write(self, values: dict[str, float]) -> None:
         self.robot.send_action({f"{j}.pos": v for j, v in values.items()})
 
-    def close(self):
+    def close(self) -> None:
         self.robot.disconnect()
         self._lock.close()

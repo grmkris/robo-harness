@@ -8,7 +8,7 @@ class Bus:
     def __init__(self, position=2000):
         self.motors = {"shoulder_pan": object(), "gripper": object()}
         self.calibration = {name: SimpleNamespace(range_min=1000, range_max=3000) for name in self.motors}
-        self.positions = {name: position for name in self.motors}
+        self.positions = dict.fromkeys(self.motors, position)
         self.events = []
 
     def disable_torque(self):
