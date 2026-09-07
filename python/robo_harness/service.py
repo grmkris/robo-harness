@@ -100,8 +100,14 @@ def create_app(profile: dict, token: str, run_loop=True):
     async def auth(request: Request, call_next):
         if not hmac.compare_digest(request.headers.get("authorization", ""), "Bearer " + token):
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        if request.headers.get("content-length") and int(request.headers["content-length"]) > 65536:
-            return JSONResponse({"error": "Request too large"}, status_code=413)
+        raw_length = request.headers.get("content-length")
+        if raw_length:
+            try:
+                length = int(raw_length)
+            except ValueError:
+                return JSONResponse({"error": "Invalid Content-Length"}, status_code=400)
+            if length > 65536:
+                return JSONResponse({"error": "Request too large"}, status_code=413)
         return await call_next(request)
 
     @app.exception_handler(ControlError)
@@ -128,10 +134,18 @@ def create_app(profile: dict, token: str, run_loop=True):
         lease = engine.acquire(body.owner, body.mode, body.takeover)
         if body.mode == "leader":
             try:
+                if profile["backend"] == "mock":
+                    raise ControlError("Leader hardware is not present in mock mode", 422)
+                # Connecting a leader opens a serial port and blocks; doing it
+                # under engine.lock would freeze the motor tick and /observe.
+                # Build outside the lock, then install only if the lease we
+                # acquired is still the live one.
+                driver = LeRobotDriver(profile, leader=True)
                 with engine.lock:
-                    if profile["backend"] == "mock":
-                        raise ControlError("Leader hardware is not present in mock mode", 422)
-                    engine.leader = LeRobotDriver(profile, leader=True)
+                    if not engine.lease or engine.lease["id"] != lease["lease_id"]:
+                        driver.close()
+                        raise ControlError("Control lease was lost before the leader connected", 409)
+                    engine.leader = driver
             except Exception:
                 engine.stop("Leader connection failed")
                 raise

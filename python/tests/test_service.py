@@ -49,3 +49,53 @@ def test_real_driver_requires_commissioning():
 
     with pytest.raises(ValueError, match="commissioned"):
         LeRobotDriver({"commissioned": False})
+
+
+def test_leader_connect_does_not_block_observe(monkeypatch):
+    """Connecting a leader must not hold engine.lock: /observe stays responsive
+    while the (blocking) serial connect is in progress."""
+    import threading
+
+    from robo_harness.drivers import MockDriver
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class LeaderStub:
+        def close(self):
+            pass
+
+    def fake_lerobot(profile, leader=False):
+        if not leader:
+            return MockDriver()
+        started.set()
+        assert release.wait(2), "leader connect was never released"
+        return LeaderStub()
+
+    monkeypatch.setattr("robo_harness.service.LeRobotDriver", fake_lerobot)
+    p = json.loads((ROOT / "config/robot.example.json").read_text())
+    p["urdf"] = str(ROOT / "assets/so101.urdf")
+    p["backend"] = "so101"  # non-mock, so the follower is built via LeRobotDriver
+    with TestClient(create_app(p, TOKEN)) as client:
+        headers = {"Authorization": "Bearer " + TOKEN}
+        result = {}
+
+        def acquire_leader():
+            result["response"] = client.post(
+                "/control/acquire",
+                json={"owner": "lead", "mode": "leader"},
+                headers=headers,
+            )
+
+        worker = threading.Thread(target=acquire_leader)
+        worker.start()
+        assert started.wait(2), "leader connect never started"
+        # The leader is still connecting; /observe must return promptly because
+        # the connect no longer holds engine.lock.
+        began = time.monotonic()
+        observed = client.get("/observe", headers=headers)
+        assert observed.status_code == 200
+        assert time.monotonic() - began < 1.0
+        release.set()
+        worker.join(timeout=3)
+        assert result["response"].status_code == 200
