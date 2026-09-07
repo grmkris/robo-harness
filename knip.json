@@ -1,6 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["scripts/*.ts", "scripts/*.mjs", "tests/*.test.ts"],
-  "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mjs}", "tests/**/*.ts"],
-  "ignoreDependencies": ["@oxlint/plugins"]
+  "ignoreDependencies": ["@oxlint/plugins"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts", "scripts/*.mjs"],
+      "project": "scripts/**/*.{ts,mjs}"
+    },
+    "apps/server": { "entry": ["src/main.ts", "test/*.test.ts"] },
+    "apps/cli": { "entry": ["src/main.ts", "src/mcp.ts"] },
+    "apps/web": {},
+    "packages/domain": {},
+    "packages/protocol": { "entry": ["src/index.ts", "test/*.test.ts"] }
+  }
 }

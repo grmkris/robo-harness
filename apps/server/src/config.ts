@@ -3,9 +3,12 @@ import { resolve } from "node:path";
 
 import { isLoopback, isTailnetAddress } from "./access";
 
-const root = resolve(import.meta.dir, "../..");
+const root = resolve(import.meta.dir, "../../..");
 const dataDir = resolve(process.env["ROBO_DATA_DIR"] ?? `${root}/var`);
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+const webDist = resolve(
+  process.env["ROBO_WEB_DIST"] ?? `${root}/apps/web/dist`
+);
 function secret(name: string, environment?: string) {
   if (environment) {
     if (environment.length < 24) {
@@ -51,6 +54,7 @@ const trust = {
 export const config = {
   root,
   dataDir,
+  webDist,
   accessMode: process.env["ROBO_ACCESS_MODE"] ?? "tailnet",
   token: secret("operator-token", process.env["ROBO_TOKEN"]),
   agentToken: secret("agent-token", process.env["ROBO_AGENT_TOKEN"]),

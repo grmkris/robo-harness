@@ -1,8 +1,7 @@
+import { joints } from "@robo/domain";
+import type { AppEvent, Observation, ProviderInfo } from "@robo/domain";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-
-import { joints } from "../shared/contracts";
-import type { AppEvent, Observation, ProviderInfo } from "../shared/contracts";
 
 import "./style.css";
 

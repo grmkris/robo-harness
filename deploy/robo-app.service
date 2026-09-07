@@ -9,7 +9,7 @@ Type=simple
 # where development happens; see docs/real-arm-preflight.md "Deployment".
 WorkingDirectory=/home/kristjan/code/robo-harness-deploy
 EnvironmentFile=/home/kristjan/code/robo-harness-deploy/.env
-ExecStart=/home/kristjan/.bun/bin/bun src/server/main.ts
+ExecStart=/home/kristjan/.bun/bin/bun apps/server/src/main.ts
 Restart=on-failure
 RestartSec=3
 UMask=0077

@@ -3,13 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const root = join(import.meta.dir, "..");
+const root = join(import.meta.dir, "../../..");
 const base = "http://127.0.0.1:18942";
 let child: ReturnType<typeof Bun.spawn>;
 let directory = "";
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "robo-tailnet-"));
-  child = Bun.spawn(["bun", "src/server/main.ts"], {
+  child = Bun.spawn(["bun", "apps/server/src/main.ts"], {
     cwd: root,
     env: {
       ...process.env,

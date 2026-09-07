@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { callTool } from "./client";
+import { callTool } from "@robo/protocol";
 
 const [name, input = "{}"] = process.argv.slice(2);
 if (!name || name === "--help") {

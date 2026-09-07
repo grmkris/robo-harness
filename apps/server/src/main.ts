@@ -1,9 +1,9 @@
 import { resolve, sep } from "node:path";
 
+import { toolSchemas } from "@robo/protocol";
+import type { ToolName } from "@robo/protocol";
 import { z } from "zod";
 
-import { toolSchemas } from "../shared/contracts";
-import type { ToolName } from "../shared/contracts";
 import { equal, parseCursor, trustedSource } from "./access";
 import * as agent from "./agent";
 import { getCapability, sweepCapabilities } from "./capabilities";
@@ -419,8 +419,8 @@ async function handle(req: Request): Promise<Response> {
     }
     return json({ error: "Not found" }, 404);
   }
-  const filePath = resolve(config.root, "dist", `.${path}`);
-  const base = resolve(config.root, "dist");
+  const filePath = resolve(config.webDist, `.${path}`);
+  const base = resolve(config.webDist);
   if (!filePath.startsWith(base + sep) && filePath !== base) {
     return json({ error: "Invalid path" }, 400);
   }
@@ -428,7 +428,7 @@ async function handle(req: Request): Promise<Response> {
   if ((await file.exists()) && path !== "/") {
     return new Response(file);
   }
-  const index = Bun.file(`${config.root}/dist/index.html`);
+  const index = Bun.file(`${config.webDist}/index.html`);
   return (await index.exists())
     ? new Response(index)
     : new Response(

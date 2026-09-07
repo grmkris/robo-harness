@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
-import { config } from "../src/server/config";
+import { config } from "../apps/server/src/config";
 
 const children: ChildProcess[] = [];
 let stopping = false;
@@ -59,6 +59,6 @@ start([`${config.root}/.venv/bin/python`, "-m", "robo_harness.telemetry"], {
   ROBO_URL: `http://${config.host}:${config.port}`,
   ROBO_DATA_DIR: config.dataDir,
 });
-start(["bun", "x", "vite"]);
+start(["bun", "--filter", "@robo/web", "dev"]);
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

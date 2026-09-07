@@ -1,7 +1,7 @@
+import type { Frame } from "@robo/domain";
 import { streamText } from "ai";
 import type { ModelMessage } from "ai";
 
-import type { Frame } from "../shared/contracts";
 import { resolveModel } from "./providers";
 import { release, renew, ApiError } from "./robot";
 import { db, emit } from "./store";

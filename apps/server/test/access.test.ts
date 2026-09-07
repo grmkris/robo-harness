@@ -5,7 +5,7 @@ import {
   isTailnetAddress,
   parseCursor,
   trustedSource,
-} from "../src/server/access";
+} from "../src/access";
 
 describe("trustedSource", () => {
   const trust = { loopback: false, blocked: new Set(["100.100.0.9"]) };

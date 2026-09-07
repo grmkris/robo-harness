@@ -5,6 +5,7 @@ const target = `http://${process.env["ROBO_HOST"] ?? "127.0.0.1"}:${
   process.env["ROBO_PORT"] ?? "8940"
 }`;
 export default defineConfig({
+  root: import.meta.dirname,
   plugins: [react()],
   server: {
     host: "127.0.0.1",

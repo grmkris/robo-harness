@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 
-import { moveSchema, toolSchemas } from "../src/shared/contracts";
+import { moveSchema, toolSchemas } from "../src/index";
 
 describe("public motion contract", () => {
   test("partial joint moves are valid", () =>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { dockerArguments, shellNetwork } from "../src/server/shell-args";
+import { dockerArguments, shellNetwork } from "../src/shell-args";
 
 const base = {
   id: "abc",

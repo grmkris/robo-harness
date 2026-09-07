@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const root = join(import.meta.dir, "..");
+const root = join(import.meta.dir, "../../..");
 const appPort = 18_940,
   ioPort = 18_941;
 const operator = "integration-operator-token-not-a-real-secret";
@@ -149,7 +149,7 @@ beforeAll(async () => {
       stderr: "pipe",
     }
   );
-  app = Bun.spawn(["bun", "src/server/main.ts"], {
+  app = Bun.spawn(["bun", "apps/server/src/main.ts"], {
     cwd: root,
     env: {
       ...process.env,
@@ -447,7 +447,7 @@ describe("mock HTTP integration", () => {
   test("MCP serves the same observation and image capabilities", async () => {
     const transport = new StdioClientTransport({
       command: "bun",
-      args: [`${root}/src/mcp.ts`],
+      args: [`${root}/apps/cli/src/mcp.ts`],
       env: {
         ...Object.fromEntries(
           Object.entries(process.env).filter(

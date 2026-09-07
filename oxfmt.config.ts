@@ -8,6 +8,7 @@ export default defineConfig({
     // Runtime state, build output and virtual environments are not source.
     "var/**",
     "dist/**",
+    "apps/web/dist/**",
     ".venv/**",
     ".expect/**",
     // The URDF is a vendored lab artifact; its formatting belongs upstream.

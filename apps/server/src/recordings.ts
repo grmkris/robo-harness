@@ -8,7 +8,8 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { AppEvent } from "../shared/contracts";
+import type { AppEvent } from "@robo/domain";
+
 import { config } from "./config";
 import { freshObservation, currentFrames, clock, ApiError } from "./robot";
 import { db, emit } from "./store";

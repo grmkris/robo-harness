@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 
-import type { AppEvent } from "../shared/contracts";
+import type { AppEvent } from "@robo/domain";
+
 import { config } from "./config";
 
 export const db = new Database(`${config.dataDir}/harness.sqlite`, {

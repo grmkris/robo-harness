@@ -2,8 +2,20 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["bun", "vite/client"],
-    "strictNullChecks": true
+    "types": ["bun"],
+    "strictNullChecks": true,
+    "paths": {
+      "@robo/domain": ["./packages/domain/src/index.ts"],
+      "@robo/protocol": ["./packages/protocol/src/index.ts"]
+    }
   },
-  "include": ["src", "scripts", "tests", "*.config.ts"]
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "scripts/**/*.ts",
+    "tools/**/*.ts",
+    "*.config.ts",
+    "apps/web/vite.config.ts"
+  ]
 }

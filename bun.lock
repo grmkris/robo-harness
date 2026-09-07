@@ -4,20 +4,10 @@
   "workspaces": {
     "": {
       "name": "robo-harness",
-      "dependencies": {
-        "@ai-sdk/openai-compatible": "3.0.37",
-        "@modelcontextprotocol/sdk": "1.30.0",
-        "ai": "7.0.79",
-        "react": "19.2.8",
-        "react-dom": "19.2.8",
-        "zod": "4.5.4",
-      },
       "devDependencies": {
+        "@modelcontextprotocol/sdk": "1.30.0",
         "@oxlint/plugins": "1.81.0",
         "@types/bun": "1.4.1",
-        "@types/react": "19.2.18",
-        "@types/react-dom": "19.2.7",
-        "@vitejs/plugin-react": "6.1.1",
         "knip": "6.34.0",
         "lefthook": "2.1.12",
         "oxfmt": "0.66.0",
@@ -25,7 +15,47 @@
         "oxlint-tsgolint": "7.0.2001",
         "typescript": "7.0.2",
         "ultracite": "7.10.8",
+      },
+    },
+    "apps/cli": {
+      "name": "@robo/cli",
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "1.30.0",
+        "@robo/protocol": "workspace:*",
+      },
+    },
+    "apps/server": {
+      "name": "@robo/server",
+      "dependencies": {
+        "@ai-sdk/openai-compatible": "3.0.37",
+        "@robo/domain": "workspace:*",
+        "@robo/protocol": "workspace:*",
+        "ai": "7.0.79",
+        "zod": "4.5.4",
+      },
+    },
+    "apps/web": {
+      "name": "@robo/web",
+      "dependencies": {
+        "@robo/domain": "workspace:*",
+        "react": "19.2.8",
+        "react-dom": "19.2.8",
+      },
+      "devDependencies": {
+        "@types/react": "19.2.18",
+        "@types/react-dom": "19.2.7",
+        "@vitejs/plugin-react": "6.1.1",
         "vite": "8.2.2",
+      },
+    },
+    "packages/domain": {
+      "name": "@robo/domain",
+    },
+    "packages/protocol": {
+      "name": "@robo/protocol",
+      "dependencies": {
+        "@robo/domain": "workspace:*",
+        "zod": "4.5.4",
       },
     },
   },
@@ -235,6 +265,16 @@
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.81.0", "", { "os": "win32", "cpu": "x64" }, "sha512-IZuUCwGw9emG5JtCp+fYGB+Z4OWEoeEcM8R5BA1pYw63/ieYFVdcU2ylxTpHbVHSenZnsYE+ZZ20uHAJszQ4cA=="],
 
     "@oxlint/plugins": ["@oxlint/plugins@1.81.0", "", {}, "sha512-HhD8kd3r6XpelZkhxhRty/po8V6yK1VV63Eq4kSsOS2IoHUywG3DV2EX+z/ZHw46aLI74Y6aA604NRiAqLKW9w=="],
+
+    "@robo/cli": ["@robo/cli@workspace:apps/cli"],
+
+    "@robo/domain": ["@robo/domain@workspace:packages/domain"],
+
+    "@robo/protocol": ["@robo/protocol@workspace:packages/protocol"],
+
+    "@robo/server": ["@robo/server@workspace:apps/server"],
+
+    "@robo/web": ["@robo/web@workspace:apps/web"],
 
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.7", "", { "os": "android", "cpu": "arm" }, "sha512-EypzgnYCwyVY4NDHKzGmNJT5b+XaQEBniHxsMdeIQLB/tcCzZnhqrzHpZFbX9iaxx+5RiB8caATBtfvZP7zVxQ=="],
 

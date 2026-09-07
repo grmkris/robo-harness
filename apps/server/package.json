@@ -1,0 +1,12 @@
+{
+  "name": "@robo/server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.37",
+    "@robo/domain": "workspace:*",
+    "@robo/protocol": "workspace:*",
+    "ai": "7.0.79",
+    "zod": "4.5.4"
+  }
+}

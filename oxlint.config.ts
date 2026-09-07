@@ -84,6 +84,7 @@ export default defineConfig({
     ...(core.ignorePatterns ?? []),
     "var/**",
     "dist/**",
+    "apps/web/dist/**",
     ".venv/**",
     ".expect/**",
     ".invok/**",

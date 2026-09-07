@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import type { ProviderInfo } from "@robo/domain";
 
-import type { ProviderInfo } from "../shared/contracts";
 import { ApiError } from "./robot";
 
 const alibaba =

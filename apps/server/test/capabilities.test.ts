@@ -4,7 +4,7 @@ import {
   getCapability,
   issueCapability,
   sweepCapabilities,
-} from "../src/server/capabilities";
+} from "../src/capabilities";
 
 describe("capabilities", () => {
   test("issued tokens resolve to a program principal until revoked", () => {

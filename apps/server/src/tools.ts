@@ -1,8 +1,9 @@
+import type { Frame } from "@robo/domain";
+import { toolSchemas, type ToolName } from "@robo/protocol";
 import { tool, jsonSchema } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
 
-import { type Frame, toolSchemas, type ToolName } from "../shared/contracts";
 import { perceive } from "./perception";
 import { startRecording, stopRecording } from "./recordings";
 import * as robot from "./robot";

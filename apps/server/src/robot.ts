@@ -1,13 +1,7 @@
+import type { Observation, Frame, Joint, Lease, Operation } from "@robo/domain";
+import type { moveSchema } from "@robo/protocol";
 import type { z } from "zod";
 
-import type {
-  Observation,
-  Frame,
-  Joint,
-  Lease,
-  Operation,
-  moveSchema,
-} from "../shared/contracts";
 import { config } from "./config";
 import { emit } from "./store";
 
