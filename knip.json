@@ -1,15 +1,21 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreDependencies": ["@oxlint/plugins"],
+  "ignoreBinaries": ["uv"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts", "scripts/*.mjs"],
-      "project": "scripts/**/*.{ts,mjs}"
+      "entry": [
+        "scripts/*.ts",
+        "scripts/*.mjs",
+        "tools/check-graph.ts",
+        "tools/oxlint/*.ts"
+      ],
+      "project": ["scripts/**/*.{ts,mjs}", "tools/**/*.ts"]
     },
     "apps/server": { "entry": ["src/main.ts", "test/*.test.ts"] },
     "apps/cli": { "entry": ["src/main.ts", "src/mcp.ts"] },
     "apps/web": {},
     "packages/domain": {},
-    "packages/protocol": { "entry": ["src/index.ts", "test/*.test.ts"] }
+    "packages/protocol": { "entry": ["src/index.ts", "test/*.test.ts"] },
+    "python": {}
   }
 }

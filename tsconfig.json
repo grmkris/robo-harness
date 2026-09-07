@@ -14,7 +14,6 @@
     "apps/**/*.tsx",
     "packages/**/*.ts",
     "scripts/**/*.ts",
-    "tools/**/*.ts",
     "*.config.ts",
     "apps/web/vite.config.ts"
   ]

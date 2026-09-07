@@ -58,6 +58,9 @@
         "zod": "4.5.4",
       },
     },
+    "python": {
+      "name": "@robo/python",
+    },
   },
   "packages": {
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.64", "", { "dependencies": { "@ai-sdk/provider": "4.0.8", "@ai-sdk/provider-utils": "5.0.30", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-iayK1z11I0b3sgbP3j6eKQypfpwO5Fbtaq1Mkwv7YxwGQG1YTNr5QAjyYsSfqyf/58WUOLWz2cTBpk+ExZVgpw=="],
@@ -271,6 +274,8 @@
     "@robo/domain": ["@robo/domain@workspace:packages/domain"],
 
     "@robo/protocol": ["@robo/protocol@workspace:packages/protocol"],
+
+    "@robo/python": ["@robo/python@workspace:python"],
 
     "@robo/server": ["@robo/server@workspace:apps/server"],
 
