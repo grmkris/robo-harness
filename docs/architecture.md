@@ -5,14 +5,14 @@ Robo Harness has three processes and one wire contract between them.
 ## Processes
 
 - **Python motor owner** (`python/robo_harness`, `robo-io`). A FastAPI service on the Pi. One daemon thread is the single writer to the motors, under one lock, at 30 Hz. It owns the driver (mock or LeRobot/Feetech), the cameras (through the so101-lab `lab_cameras` owner), control leases, bounded moves, measured completion, idempotent request IDs, and fault latching. Camera JPEG encoding runs in per-camera threads, never on the motor loop.
-- **TypeScript coordinator** (`src/server`, `robo-app`). A Bun HTTP server. It polls the motor owner at 10 Hz, holds the latest observation and per-owner lease state, authenticates callers, runs the agent chat loop over the Vercel AI SDK, records sessions to SQLite and disk, proxies the Rerun viewer, and serves the built workbench. It never touches the motors directly; every motion goes through the Python service.
+- **TypeScript coordinator** (`apps/server`, `robo-app`). A Bun HTTP server. It polls the motor owner at 10 Hz, holds the latest observation and per-owner lease state, authenticates callers, runs the agent chat loop over the Vercel AI SDK, records sessions to SQLite and disk, proxies the Rerun viewer, and serves the built workbench. It never touches the motors directly; every motion goes through the Python service.
 - **Rerun telemetry worker** (`python/robo_harness/telemetry.py`, `robo-rerun`). A separate process that spawns the Rerun viewer bound to loopback and polls the coordinator's telemetry endpoint. It is off the motor loop by construction.
 
-The React/Vite workbench (`src/web`) is a client of the coordinator only.
+The React/Vite workbench (`apps/web`) is a client of the coordinator only.
 
 ## Wire contract
 
-`src/shared/contracts.ts` is the shared contract: the observation, operation, frame and lease shapes, and the tool input schemas. The coordinator validates tool input against it, the workbench and MCP server speak it, and the Python service produces observations that match it. It is decoded at each boundary, not trusted.
+The shared contract now lives in `packages/domain` (value types) and `packages/protocol` (tool schemas and the typed client): the observation, operation, frame and lease shapes, and the tool input schemas. The coordinator validates tool input against it, the workbench and MCP server speak it, and the Python service produces observations that match it. It is decoded at each boundary, not trusted.
 
 ## Trust and deployment
 
