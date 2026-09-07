@@ -28,6 +28,7 @@
       "name": "@robo/server",
       "dependencies": {
         "@ai-sdk/openai-compatible": "3.0.37",
+        "@ai-sdk/provider": "4.0.8",
         "@effect/platform-bun": "4.0.0-rc.112",
         "@robo/domain": "workspace:*",
         "@robo/protocol": "workspace:*",

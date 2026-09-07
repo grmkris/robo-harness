@@ -1,7 +1,7 @@
 import type { Frame } from "@robo/domain";
-import { streamText } from "ai";
 import type { ModelMessage } from "ai";
 
+import { runChatLoop } from "./loop";
 import { resolveModel } from "./providers";
 import { release, renew, ApiError } from "./robot";
 import { db, emit } from "./store";
@@ -18,6 +18,7 @@ Keep tasks incremental. Explain observations, actions, and failures briefly. Sto
 You may write and run programs in the development workspace. Pi hardware deployment requires operator review.
 Perception incurs the preapproved budget. Do not provision compute or claim success without evidence.
 The mock backend has synthetic cameras and is not a physics or grasp simulator.`;
+
 export function running() {
   return [...sessions.keys()];
 }
@@ -32,7 +33,7 @@ function history(id: string) {
   const row = db.query("SELECT * FROM conversations WHERE id=?").get(id) as {
     messages: string;
   } | null;
-  return row ? JSON.parse(row.messages) : [];
+  return row ? (JSON.parse(row.messages) as ModelMessage[]) : [];
 }
 export function cancel(id: string) {
   sessions.get(id)?.abort.abort();
@@ -45,19 +46,6 @@ export function steer(id: string, text: string) {
   }
   session.inbox.push(text);
   emit("chat.steer", { session_id: id, text });
-}
-function trim(messages: ModelMessage[]) {
-  // Keep complete user-delimited turns so tool-call/result pairs survive context trimming.
-  let total = JSON.stringify(messages).length;
-  while (total > 100_000 && messages.length > 4) {
-    const next = messages.findIndex((m, i) => i > 0 && m.role === "user");
-    if (next < 1) {
-      break;
-    }
-    messages = messages.slice(next);
-    total = JSON.stringify(messages).length;
-  }
-  return messages;
 }
 function safe(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -73,6 +61,43 @@ function safe(value: unknown): unknown {
     );
   }
   return value;
+}
+// Images stay in the live message array for the model but never in the stored
+// transcript, which would otherwise grow by megabytes per captured frame.
+function withoutImages(list: readonly ModelMessage[]): ModelMessage[] {
+  return list.map((message) => {
+    if (!Array.isArray(message.content)) {
+      return message;
+    }
+    return {
+      ...message,
+      content: message.content.map((part) =>
+        part.type === "image"
+          ? { type: "text" as const, text: "[camera frame]" }
+          : part
+      ),
+    } as ModelMessage;
+  });
+}
+/** A captured frame as the user message a vision model reads: metadata as
+ *  text (base64 stripped) and the image part alongside it. */
+function frameMessage(frame: Frame): ModelMessage {
+  return {
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: `Camera tool observation: ${JSON.stringify({
+          ...frame,
+          base64: undefined,
+        })}`,
+      },
+      {
+        type: "image",
+        image: `data:${frame.media_type};base64,${frame.base64}`,
+      },
+    ],
+  };
 }
 export async function startChat(provider: string, text: string, id?: string) {
   const sessionId = id ?? crypto.randomUUID();
@@ -100,31 +125,18 @@ export async function startChat(provider: string, text: string, id?: string) {
     throw error;
   }
   const owner = `chat-${sessionId}`;
-  // Images stay in the live message array for the model but never in the stored
-  // transcript, which would otherwise grow by megabytes per captured frame.
-  const withoutImages = (list: ModelMessage[]) =>
-    list.map((message) => {
-      if (!Array.isArray(message.content)) {
-        return message;
-      }
-      return {
-        ...message,
-        content: message.content.map((part) =>
-          part.type === "image"
-            ? { type: "text" as const, text: "[camera frame]" }
-            : part
-        ),
-      };
-    });
-  const persist = (messages: ModelMessage[]) =>
+  const persist = (messages: readonly ModelMessage[]) =>
     db
       .query("UPDATE conversations SET messages=? WHERE id=?")
       .run(JSON.stringify(withoutImages(messages)), sessionId);
-  let messages: ModelMessage[] = history(sessionId);
-  messages.push({ role: "user", content: text });
-  persist(messages);
+  const opening = [
+    ...history(sessionId),
+    { role: "user" as const, content: text },
+  ];
+  persist(opening);
   emit("chat.message", { session_id: sessionId, role: "user", text });
-  // Heartbeats last only while this turn actively owns a lease. Human takeover makes renew fail.
+  // Heartbeats last only while this turn actively owns a lease. Human takeover
+  // makes renew fail.
   const heartbeat = setInterval(() => {
     void renew(owner).catch(() => {});
   }, 900);
@@ -137,103 +149,59 @@ export async function startChat(provider: string, text: string, id?: string) {
         resolved.info.vision,
         (frame) => pendingImages.push(frame)
       );
-      let previous = "";
-      let repeats = 0;
-      for (let step = 0; step < 24; step++) {
-        state.abort.signal.throwIfAborted();
-        for (const text of state.inbox.splice(0)) {
-          messages.push({
-            role: "user",
-            content: "Operator steering: " + text,
+      const stream = runChatLoop({
+        model: resolved.model,
+        instructions,
+        tools,
+        abortSignal: state.abort.signal,
+        history: opening,
+        drainSteers: () => state.inbox.splice(0),
+        drainImages: () => {
+          const frames = pendingImages.splice(0);
+          return resolved.info.vision ? frames.map(frameMessage) : [];
+        },
+        onPersist: persist,
+      });
+      let assistant = "";
+      for await (const part of stream) {
+        if (part.type === "text-delta") {
+          assistant += part.text;
+          emit("chat.delta", { session_id: sessionId, text: part.text });
+        } else if (part.type === "tool-call") {
+          emit("chat.tool", {
+            session_id: sessionId,
+            name: part.toolName,
+            input: safe(part.input),
           });
-        }
-        messages = trim(messages);
-        const result = streamText({
-          model: resolved.model,
-          system: instructions,
-          messages,
-          tools,
-          abortSignal: state.abort.signal,
-          maxOutputTokens: 4096,
-          maxRetries: 0,
-        });
-        let assistant = "";
-        let calls = 0;
-        const stall = setTimeout(
-          () => state.abort.abort(new Error("Provider stalled")),
-          120_000
-        );
-        try {
-          for await (const part of result.fullStream) {
-            if (part.type === "text-delta") {
-              assistant += part.text;
-              emit("chat.delta", { session_id: sessionId, text: part.text });
-            } else if (part.type === "tool-call") {
-              calls++;
-              emit("chat.tool", {
-                session_id: sessionId,
-                name: part.toolName,
-                input: safe(part.input),
-              });
-            } else if (part.type === "tool-result") {
-              emit("chat.tool_result", {
-                session_id: sessionId,
-                name: part.toolName,
-                output: safe(part.output),
-              });
-            } else if (part.type === "error") {
-              throw part.error;
-            }
+        } else if (part.type === "tool-result") {
+          emit("chat.tool_result", {
+            session_id: sessionId,
+            name: part.toolName,
+            output: safe(part.output),
+          });
+        } else if (part.type === "tool-error") {
+          emit("chat.tool_error", {
+            session_id: sessionId,
+            name: part.toolName,
+            message:
+              part.error instanceof Error ? part.error.message : "Tool failed",
+          });
+        } else if (part.type === "finish-step") {
+          if (assistant) {
+            emit("chat.message", {
+              session_id: sessionId,
+              role: "assistant",
+              text: assistant,
+            });
           }
-        } finally {
-          clearTimeout(stall);
-        }
-        const response = await result.response;
-        messages.push(...response.messages);
-        for (const frame of pendingImages.splice(0)) {
-          messages.push({
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Camera tool observation: ${JSON.stringify({
-                  ...frame,
-                  base64: undefined,
-                })}`,
-              },
-              {
-                type: "image",
-                image: `data:${frame.media_type};base64,${frame.base64}`,
-              },
-            ],
-          });
-        }
-        persist(messages);
-        if (assistant) {
-          emit("chat.message", {
-            session_id: sessionId,
-            role: "assistant",
-            text: assistant,
-          });
-        }
-        const signature = JSON.stringify(response.messages.map(safe));
-        repeats = signature === previous ? repeats + 1 : 0;
-        previous = signature;
-        if (repeats >= 2) {
-          throw new Error("Repeated identical steps; stopped to avoid a loop");
-        }
-        if (!calls && !state.inbox.length) {
-          break;
-        }
-        if (step === 23) {
-          emit("chat.limit", {
-            session_id: sessionId,
-            message: "Paused after 24 steps. Continue with another message.",
-          });
+          assistant = "";
+        } else if (part.type === "error") {
+          throw part.error;
         }
       }
     } catch {
-      // Provider errors may contain request headers/body. Keep them out of the event log.
+      // Provider errors may contain request headers/body. Keep them out of the
+      // event log.
       emit("chat.error", {
         session_id: sessionId,
         message: state.abort.signal.aborted

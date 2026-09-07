@@ -6,8 +6,8 @@ import type { ToolName } from "@robo/protocol";
 import { Context, Effect, Layer, Schema } from "effect";
 
 import { equal, parseCursor, trustedSource } from "./access";
-import * as agent from "./agent";
 import { getCapability, sweepCapabilities } from "./capabilities";
+import * as agent from "./chat-runs";
 import { config } from "./config";
 import { decode, isUuid, Uuid } from "./decode";
 import { budget, setBudget, perceptionConfig } from "./perception";
