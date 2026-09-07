@@ -1,6 +1,7 @@
 """LeRobot is the motor driver. Real hardware is opt-in and never auto-calibrates."""
 
 import fcntl
+import os
 from pathlib import Path
 
 from .kinematics import JOINTS
@@ -69,9 +70,11 @@ class LeRobotDriver:
             or profile.get("hold_mode") != "commanded"
         ):
             raise ValueError("Real hardware requires a reviewed commissioned profile and commanded hold")
-        self._lock = open(
-            "/tmp/robo-harness-leader.lock" if leader else "/tmp/robo-harness-follower.lock", "w"
-        )
+        # Keep the motor lock out of world-writable /tmp (symlink and eviction
+        # hazards): prefer the per-user runtime dir, fall back to /run/lock.
+        lock_dir = os.environ.get("XDG_RUNTIME_DIR") or "/run/lock"
+        lock_name = "robo-harness-leader.lock" if leader else "robo-harness-follower.lock"
+        self._lock = open(Path(lock_dir) / lock_name, "w")
         fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.is_leader = leader
         if leader:

@@ -134,8 +134,14 @@ def create_app():
     def infer(request: Inference):
         try:
             return models.infer(request)
-        except Exception as e:
+        except ValueError as e:
+            # Bad client input (oversized or malformed image — binascii.Error is
+            # a ValueError) is the caller's fault.
             return JSONResponse({"error": str(e)}, status_code=422)
+        except Exception as e:
+            # A missing GPU, a model load failure or OOM is the worker's fault,
+            # not the caller's: report it as a server error, not a 422.
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     return app
 
