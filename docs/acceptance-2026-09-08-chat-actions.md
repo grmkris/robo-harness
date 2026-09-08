@@ -25,8 +25,21 @@ The existing local-only `scripts/real-arm-smoke.ts --move` passed against the de
 - Fresh camera frames, local recording, and a 4,886,064-byte Rerun replay passed.
 - Evidence: `var/real-arm-acceptance/motion.json`. Previous evidence was preserved under `var/real-arm-acceptance/before-chat-upgrade/`.
 
-This hardware test uses the low-level MCP client. The supervised chat lifecycle is validated by the mock integration suite; it has not yet been accepted against a live model controlling the real arm.
+This first hardware test used the low-level MCP client. The subsequent approved live Qwen test below also accepted the supervised chat lifecycle on the real arm.
 
-## Remaining endpoint check
+## Approved live Qwen acceptance — passed
 
-Automatic approval review rejected the proposed live Qwen camera-and-motion acceptance because sending a workspace frame to Alibaba requires explicit image-egress authorization. That command did not run, and no frame was sent to Alibaba by this acceptance work. The pending check is one workspace image through the configured Qwen3.8-Max endpoint, one gripper-opening action bounded to two percentage points, and verification of the measured terminal result. It requires the operator's approval for the image transfer. This is separate from the already authorized and completed local deployment and hardware checks.
+The operator explicitly approved the camera transfer and bounded movement after automatic approval review initially required that confirmation. The test then ran through the deployed chat service with the configured Alibaba Token Plan account and `qwen3.8-max`; no provider credentials were imported into the development shell.
+
+Conversation: `99eae639-cb50-4de2-988c-19f46b0b5cd2`. Run: `910311c1-bacf-45ac-a589-cbd9f93c5475`.
+
+- Completed in 30.203 seconds over four model steps, with exactly three tool calls: `observe`, `capture`, `move_joints`. No model-managed acquisition or renewal calls.
+- The single workspace image was 640×480, reported 31.0 ms old, with a matching robot boot/clock domain. Qwen identified a translucent bin on a black mat and the black robot arm on a white tabletop. Those features match an independently inspected local comparison frame captured immediately after the run.
+- The move input was `{"target":{"gripper":12.1092},"duration_s":1.5}`. Both motion values were JSON numbers. Zero invalid inputs, zero tool errors, one completed action; the first tool input was valid.
+- Gripper measured 10.109290% before the move and 11.816940% at measured completion: +1.707650 percentage points, with 0.292260 percentage points residual to target. The settled post-turn reading was 11.885246%, a +1.775956-point change.
+- All five arm joints remained unchanged. Operation `d4d43ca5-113f-47b0-9c83-440baf1b12cd` completed under original request `f8e8077b-e0a7-422f-919c-34fce95c96db`. Control was released, no fault was reported, and no chat remained running.
+- Qwen's final response accurately reported the measured position, target residual, unchanged joints and completed status. It did not label acceptance alone as completion.
+
+Evidence: `var/real-arm-acceptance/chat-upgrade.json`; local visual comparison: `var/real-arm-acceptance/chat-upgrade-workspace.jpg`. These runtime artifacts remain local and are not committed. The acceptance report contains only non-secret metadata.
+
+The original failed interaction is now accepted end to end with the real model and real arm. No further implementation change or model replacement was needed for this test. This is one successful bounded scenario; the fault and concurrency cases remain covered by the automated suite.
