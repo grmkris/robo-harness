@@ -366,3 +366,20 @@ test("steering during acquisition releases control without submitting the old mo
   expect(r.state.owner).toBe("");
   expect(r.state.cancels).toBe(1);
 });
+
+test("uncommissioned XYZ is refused without disabling bounded joint exploration", async () => {
+  const r = rig();
+  const xyz = await r.executor.execute({
+    ...request("uncommissioned-xyz"),
+    input: { xyz: [0.2, 0, 0.1], duration_s: 1 },
+  });
+  expect(xyz.status).toBe("failed");
+  expect(xyz.code).toBe("CAPABILITY_UNAVAILABLE");
+  expect(r.state.acquires).toBe(0);
+  expect(r.state.submits).toBe(0);
+
+  const probe = await r.executor.execute(request("visual-joint-probe"));
+  expect(probe.status).toBe("completed");
+  expect(r.state.submits).toBe(1);
+  expect(r.state.owner).toBe("");
+});

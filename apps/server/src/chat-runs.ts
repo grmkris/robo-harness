@@ -29,7 +29,10 @@ Use discover_tools to enable recording, perception, development, or commissioned
 Perception incurs the preapproved budget. Do not provision compute or claim success without evidence.
 Read the reported backend field: so101 is real hardware; only mock has synthetic cameras. Never infer the backend from unchanged forward kinematics. Gripper opening does not change the arm end-effector position in this kinematic model.
 New operator steering replaces a conflicting earlier instruction. Do not continue its old motion plan.
-Image recognition and segmentation do not establish metric depth or a calibrated grasp target. If grasp geometry or Cartesian commissioning is unavailable, explain the missing capability instead of inventing a joint-space pickup plan. Bounded manual joint nudges remain available.
+Cartesian commissioning gates move_cartesian (XYZ commands), not move_joints. When the operator requests visual exploration or manipulation, you may choose bounded joint moves yourself; do not require the operator to supply every joint target or refuse solely because cartesian is false or camera calibration is null.
+Use a closed observation-action loop for visual exploration: observe joints and limits, capture both workspace and wrist views, identify the target and gripper, then state a small probe and what it should reveal. Initially change one joint by at most 1 degree (or 1 gripper percentage point), also respecting max_step, speed, limits and visible clearance. Move away from a nearby joint limit, never into it. Wait for measured completion, then observe and capture both views again before selecting another move. Each next step, including an approach or grasp, must have current visual support; do not execute a guessed multi-move pickup sequence.
+Keep concise learning notes in the conversation: requested joint change, actual measured change, visible gripper/object displacement in each camera, uncertainty and the next hypothesis. These are local observations near this pose, not a globally calibrated model or trained policy. If the effect is unclear, report it rather than pretending the probe worked or blindly increasing motion. Stop for unexpected contact, loss of visibility, uncertain clearance, faults, stale feedback, takeover or an unknown action outcome.
+Image recognition, segmentation and relative depth do not establish metric depth. With cartesian false, reported ee/frames/trajectory are uncommissioned model estimates, not measured gripper coordinates or proven clearance. Do not change the commissioning flag, calibrations, limits or hardware code to bypass a rejected move. Judge a grasp from visual evidence of the object being held and moving with the gripper, not from a completed joint command. Missing XYZ calibration is a limitation to explain while using the permitted visual joint workflow, not a blanket prohibition on learning.
 Completion tolerances are 0.8 degrees for arm joints and 2 percentage points for the gripper. A nonzero residual inside tolerance is expected; report the actual residual without declaring a failure solely because it is nonzero.`;
 
 export function running() {
@@ -198,7 +201,7 @@ export async function startChat(
         drainSteers: () => state.inbox.splice(0),
         steerRevision: () => state.revision,
         runtimeContext: () =>
-          `Reported backend: ${current?.backend ?? "unavailable"}. Cartesian commissioned: ${current?.cartesian === true}. Gripper opening is excluded from arm FK.`,
+          `Reported backend: ${current?.backend ?? "unavailable"}. Cartesian commissioned: ${current?.cartesian === true}. Bounded move_joints remains available for operator-requested visual exploration; XYZ requests require commissioning. When Cartesian is uncommissioned, reported end-effector coordinates are model estimates. Gripper opening is excluded from arm FK.`,
         drainImages: () => {
           const frames = pendingImages.splice(0);
           return resolved.info.vision ? frames.map(frameMessage) : [];

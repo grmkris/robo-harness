@@ -43,3 +43,19 @@ Stop Robo Harness I/O before restarting labcam-preview or another motor owner. R
 Install deploy/robo-dev-shell for a dedicated robo-dev account. Its SSH identity belongs to the coordinator, while the agent sees only the development shell interface. Use a writable home workspace and an isolated Python environment.
 
 Prepare proposed hardware changes in that workspace, run mock/static checks there, and review a diff against /opt/robo-harness/current. Only the operator/deployment identity may promote them into the active release.
+
+## Two independent workflows: visual exploration and Cartesian positioning
+
+Joint commissioning means motor readings, joint ranges and bounded motion have been checked. Cartesian commissioning additionally means the geometric model has been checked against the real arm: joint zero/sign conventions, link geometry, tool-center position, base frame, table and workspace clearances. The `so101-arm-registers-*` calibration ID identifies the motor calibration; it does not certify the camera or tool pose. The displayed `ee` is calculated by forward kinematics, not measured by a position sensor. Current IK targets position only, so tool orientation also needs review for a grasp task.
+
+The operator requested visual exploration on 2026-09-08. A model may now select a small joint probe, observe the measured result and both cameras, and adapt its next choice while Cartesian commands remain disabled. The system prompt no longer requires the human to specify each angle or treats missing XYZ commissioning as a blanket refusal. See [decision 0009](decisions/0009-visual-joint-exploration.md).
+
+For the calibrated workflow:
+
+1. Re-establish a fixed reference target and camera identity. The previous lab experiment used a 5×7 ChArUco board, 35 mm squares, 26 mm markers, dictionary `DICT_4X4_250`. Verify printed dimensions and current placement. Its code can inform offline detection; do not run its direct motor-owner scripts alongside this harness.
+2. Use the [tabletop calibration tool](tabletop-calibration.md) to validate pixel-to-plane mapping on independent check points. A board-coordinate mapping is not yet a robot-base mapping.
+3. Establish the board/table relative to `base_link` and identify the exact physical gripper point represented by `gripper_frame_link`. Compare model predictions against independently measured positions at several distinct poses and heights, reached through existing bounded joint actions. Record joint readings, actual positions, approach direction and camera evidence; repeated approach directions help expose backlash and sag. Do not use the same FK model as its own ground truth.
+4. Review position-only IK and complete link clearances for the intended local workspace. Record measured error and a task-specific tolerance. Stage any geometry/profile corrections for review; a passing image-plane fit alone cannot set `cartesian_reviewed`.
+5. After geometry review, activate the reviewed profile and perform small supervised XYZ acceptance moves, then test gripper orientation and visual grasp verification. Increase task scope only from measured results.
+
+Useful historical evidence: `~/code/so101-lab/gemini_er/calib.json`, `board_calibrate.py`, `wrist_calibrate.py` and `arm.py`. The August camera fit reports leave-one-out errors up to 16.2 mm after dropping four points. The board source notes a roughly 3–4 cm positioning shortfall before its affine correction. Those are reasons to investigate model/actuation conventions and collect current validation, not measurements of this harness's present error. None of the historical transforms has been imported into the deployed profile.

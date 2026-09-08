@@ -378,3 +378,21 @@ def test_terminal_operation_keeps_its_measured_snapshot(rig):
     assert e.measured["gripper"] == pytest.approx(50)
     assert e.get_operation(op["id"])["measured"] == completed["measured"]
     assert e.find_operation("agent", "snapshot", e.boot_id)["residual"] == completed["residual"]
+
+
+def test_real_profile_cartesian_gate_keeps_bounded_joint_probes_available(rig):
+    # Real-profile rules on the mock driver: this test never opens hardware.
+    engine, clock = rig
+    engine.profile.update(backend="so101", cartesian_reviewed=False, max_step=2, max_speed=2)
+    assert engine.observe()["cartesian"] is False
+    lease = engine.acquire("visual-agent")
+    with pytest.raises(ControlError, match="Cartesian calibration"):
+        engine.submit("xyz", lease["lease_id"], "visual-agent", xyz=engine.kin.xyz(engine.measured).tolist())
+    assert engine.operation is None
+    operation = engine.submit(
+        "probe", lease["lease_id"], "visual-agent", target={"shoulder_pan": 1}, duration_s=1
+    )
+    advance(engine, clock, 1.2)
+    assert engine.get_operation(operation["id"])["status"] == "completed"
+    assert engine.measured["shoulder_pan"] == pytest.approx(1)
+    assert engine.observe()["cartesian"] is False

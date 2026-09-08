@@ -17,7 +17,7 @@ export interface Principal {
 }
 export const descriptions: Record<ToolName, string> = {
   observe:
-    "Read current measured/commanded joints, Cartesian pose, control owner, limits, camera freshness, and faults.",
+    "Read current measured/commanded joints, model-derived end-effector pose, control owner, limits, camera freshness, and faults. cartesian=false disables XYZ commands, not bounded joint moves; in that case ee/frames/trajectory are uncommissioned estimates, not measured Cartesian geometry.",
   capture:
     "Capture a fresh workspace or wrist camera frame. Image and exact capture metadata are returned.",
   acquire:

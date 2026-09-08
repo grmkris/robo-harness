@@ -94,7 +94,7 @@ export const createChatTools = (options: {
   let offered = new Set<ChatToolName>();
   const describe: Record<ChatToolName, string> = {
     ...descriptions,
-    move_joints: `Move to a bounded joint target and wait for measured completion. The runtime handles control and renewal. Supply numbers, never quoted numbers. Angles are degrees, gripper is 0–100. One motion per response. Example shape: ${jointExample}; choose values from a fresh observation, within max_step. Do not retry an unknown outcome.`,
+    move_joints: `Move to a bounded joint target and wait for measured completion. The runtime handles control and renewal. Supply numbers, never quoted numbers. Angles are degrees, gripper is 0–100. Available even when cartesian is false: use small, visually supported joint probes and capture both cameras again after completion before choosing the next move. One motion per response. Example shape: ${jointExample}; choose values from a fresh observation, within max_step. Do not retry an unknown outcome.`,
     move_cartesian:
       'Move to a commissioned Cartesian position in meters in base_link and wait for measured completion. Example shape: {"xyz":[0.2,0,0.1],"duration_s":1}. Observe first and choose a valid reachable target.',
     discover_tools:
