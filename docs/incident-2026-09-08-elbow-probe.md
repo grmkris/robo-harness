@@ -31,3 +31,13 @@ Local incident evidence is saved under `var/elbow-failure-2026-09-08/` (transcri
 `bun run check:fast` and `bun run check` passed, including 128 Bun tests and 83 Python tests. The focused action-executor suite passed all 17 cases. `bun run build` passed. Existing transitional lint warnings, optional Python import warnings, dependency deprecations and the large Ghostty build chunk warning remain.
 
 The Expect chat checks passed against an isolated mock: model capability selection, invalid-input recovery, measured completion, released ownership, mobile Stop access and event replay. The first runner attempt omitted the extra text-only fixture model; adding it to the mock catalog allowed the existing checks to run. No paid model or real motor was used by this browser check.
+
+## Operator-requested retry
+
+After the operator said “go try again,” Qwen resumed the same conversation with fresh joint observations and both camera views. This turn permitted exactly one elbow-only diagnostic to 96.44 degrees over two seconds, approximately 1.8 degrees inward and within the existing two-degree bound. The initial chat-start request was rejected for an incorrect request field before any model run or motion; the corrected request resumed the intended conversation.
+
+Operation `c8aaa478-3092-48eb-bcff-a91c8abdea5c`, request `ad08e9c5-8d93-4d0a-bdb4-f2d5d266c931`, failed its measured settling check. The elbow remained at 98.241758 degrees, with a 1.801758-degree residual. Every other measured joint was unchanged. The terminal response correctly omitted the former cleanup warning: the owner-specific fallback confirmed cleanup, control was free and the control epoch advanced from 8 to 9. No fault was reported. There was exactly one motion request in the retry turn, followed by observation and both cameras; no pickup or further probe followed.
+
+Qwen reported no visible change. Its final explanation overstated the evidence by calling the calibration bound a mechanical limit and the software `commanded` field a motor register. Neither a hard-stop location nor the actual motor goal register was measured. An unchanged joint reading also does not establish whether the cause is a mechanical stall, disabled torque, controller response or readback failure. The next diagnostic should examine the elbow's torque-enable/error/current and actual goal/position registers through exclusive motor ownership, rather than infer those values from the coordinator observation.
+
+Retry artifacts are under `var/elbow-retry-2026-09-08/`: full transcript, before/after observations and local before/after camera frames. No settings, calibration, gains or limits were changed.
