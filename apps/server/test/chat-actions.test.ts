@@ -263,6 +263,8 @@ test("optional numeric defaults remain optional on the wire and validate without
       minimum: 0.1,
       maximum: 10,
     });
+    // Status is sampled; the actual release can precede the next published observation.
+    await h.until(async () => (await h.status()).observation.operator === null);
     expect((await h.status()).observation.operator).toBeNull();
   } finally {
     await h.close();

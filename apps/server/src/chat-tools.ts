@@ -213,6 +213,19 @@ export const createChatTools = (options: {
           motionDisabled = true;
         return result;
       }
+      if (name === "observe") {
+        // Model/tool initialization can outlive the sampler's cache window.
+        // An explicit agent observation reads the motor service afresh and
+        // still includes the full transport time in the 250 ms age bound.
+        const observation = await robot.motionIO.observe(signal);
+        if (observation.age_ms > 250)
+          throw new ToolFailure({
+            code: "UNSAFE_TARGET",
+            detail:
+              "Robot observation is stale after transport. Observe again before acting.",
+          });
+        return observation;
+      }
       const output = await executeTool(name, input, options.principal, signal);
       if (name === "capture") {
         const frame = Schema.decodeUnknownSync(Frame)(output);

@@ -211,7 +211,9 @@ export async function startHarness(
     try {
       const s = await status();
       return withIo
-        ? s.observation?.backend === "mock" && !s.robot_error
+        ? s.observation?.backend === "mock" &&
+            !s.robot_error &&
+            (await call("observe")).status === 200
         : true;
     } catch {
       return false;

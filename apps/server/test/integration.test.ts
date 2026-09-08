@@ -159,6 +159,7 @@ describe("mock HTTP integration", () => {
       },
       agentToken
     );
+    expect(result.status).toBe(200);
     await until(
       async () =>
         (await call("operation", { id: result.data.id })).data.status ===
