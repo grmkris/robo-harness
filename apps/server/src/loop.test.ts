@@ -1,148 +1,168 @@
 import { expect, test } from "bun:test";
 
-import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
-import { jsonSchema, tool, type ModelMessage, type ToolSet } from "ai";
-import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
+import { std } from "@robo/protocol";
+import {
+  EventType,
+  type ModelMessage,
+  type StreamChunk,
+  type Tool,
+} from "@tanstack/ai";
+import { Effect, Schema, Stream } from "effect";
 
+import type { ChatAdapter, ChatEvent } from "./chat-stream";
 import { runChatLoop } from "./loop";
 import { DOOM_LOOP_STOP } from "./stop-conditions";
 
-const nullUsage = {
-  inputTokens: {
-    total: undefined,
-    noCache: undefined,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: undefined, text: undefined, reasoning: undefined },
-} as const;
-
-type Chunk = LanguageModelV4StreamPart;
-
-/** A step that calls one tool with `{}` and returns to the loop. */
-const toolStep = (toolName: string, id: string): Chunk[] => [
-  { type: "stream-start", warnings: [] },
-  { type: "tool-call", toolCallId: id, toolName, input: "{}" },
-  {
-    type: "finish",
-    usage: nullUsage,
-    finishReason: { unified: "tool-calls", raw: "tool_use" },
-  },
-];
-
-/** A step that streams `text` and stops. */
-const textStep = (text: string): Chunk[] => [
-  { type: "stream-start", warnings: [] },
-  { type: "text-start", id: "t" },
-  { type: "text-delta", id: "t", delta: text },
-  { type: "text-end", id: "t" },
-  {
-    type: "finish",
-    usage: nullUsage,
-    finishReason: { unified: "stop", raw: "end_turn" },
-  },
-];
-
-const scriptedModel = (steps: Chunk[][]): MockLanguageModelV4 =>
-  new MockLanguageModelV4({
-    doStream: steps.map((chunks) => ({
-      stream: simulateReadableStream({ chunks }),
-    })),
-  });
-
-const pingTools = (): ToolSet => ({
-  ping: tool({
-    description: "ping",
-    inputSchema: jsonSchema<Record<string, never>>({
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    }),
-    execute: () => Promise.resolve({ ok: true }),
-  }),
+type RequestOptions = Parameters<ChatAdapter["chatStream"]>[0];
+const finished = (finishReason: "stop" | "tool_calls"): StreamChunk => ({
+  type: EventType.RUN_FINISHED,
+  runId: "fixture",
+  threadId: "fixture",
+  timestamp: Date.now(),
+  metadata: { tanstack: { finishReason } },
 });
-
-const drain = async (
-  stream: AsyncIterable<{ type: string; text?: string }>
-): Promise<{ types: string[]; text: string }> => {
-  const types: string[] = [];
-  let text = "";
-  for await (const part of stream) {
-    types.push(part.type);
-    if (part.type === "text-delta" && typeof part.text === "string") {
-      text += part.text;
-    }
-  }
-  return { types, text };
+const toolStep = (name: string, id: string, args = "{}"): StreamChunk[] => [
+  {
+    type: "TOOL_CALL_START",
+    toolCallId: id,
+    toolCallName: name,
+    timestamp: Date.now(),
+  },
+  {
+    type: EventType.TOOL_CALL_ARGS,
+    toolCallId: id,
+    delta: args,
+    timestamp: Date.now(),
+  },
+  { type: "TOOL_CALL_END", toolCallId: id, timestamp: Date.now() },
+  finished("tool_calls"),
+];
+const textStep = (text: string): StreamChunk[] => [
+  {
+    type: EventType.TEXT_MESSAGE_START,
+    messageId: "text",
+    role: "assistant",
+    timestamp: Date.now(),
+  },
+  {
+    type: EventType.TEXT_MESSAGE_CONTENT,
+    messageId: "text",
+    delta: text,
+    timestamp: Date.now(),
+  },
+  {
+    type: EventType.TEXT_MESSAGE_END,
+    messageId: "text",
+    timestamp: Date.now(),
+  },
+  finished("stop"),
+];
+const scriptedModel = (steps: StreamChunk[][]) => {
+  const requests: RequestOptions[] = [];
+  const model: ChatAdapter = {
+    kind: "text",
+    name: "fixture",
+    model: "fixture",
+    "~types": {
+      providerOptions: {},
+      inputModalities: ["text", "image"],
+      messageMetadataByModality: {
+        text: undefined,
+        image: undefined,
+        audio: undefined,
+        video: undefined,
+        document: undefined,
+      },
+      toolCapabilities: [],
+      toolCallMetadata: undefined,
+      systemPromptMetadata: undefined as never,
+    },
+    async *chatStream(options) {
+      requests.push(options);
+      yield* steps[requests.length - 1] ?? textStep("done");
+    },
+    structuredOutput: async () => ({ data: {}, rawText: "{}" }),
+  };
+  return { model, requests };
 };
-
-const noImages = () => [] as ModelMessage[];
-
+const ping = (execute: Tool["execute"] = async () => ({ ok: true })): Tool => ({
+  name: "ping",
+  description: "ping",
+  inputSchema: std(Schema.Struct({})),
+  execute,
+});
 const base = (
-  model: MockLanguageModelV4,
+  model: ChatAdapter,
   over: Partial<Parameters<typeof runChatLoop>[0]> = {}
 ) =>
   runChatLoop({
     model,
     instructions: "test",
-    tools: pingTools(),
+    tools: [ping()],
     abortSignal: new AbortController().signal,
     history: [{ role: "user", content: "go" }],
     drainSteers: () => [],
-    drainImages: noImages,
+    drainImages: () => [],
     onPersist: () => {},
     ...over,
   });
+const drain = (stream: ReturnType<typeof runChatLoop>) =>
+  Effect.runPromise(Stream.runCollect(stream));
+const types = (events: readonly ChatEvent[]) => events.map((part) => part.type);
 
-test("a model that repeats the identical tool call is stopped by the doom-loop guard, not run to the step cap", async () => {
-  const model = scriptedModel(
-    Array.from({ length: 20 }, (_, i) => toolStep("ping", `c${String(i)}`))
+test("identical tool calls stop at the doom threshold with a reserved summary", async () => {
+  const { model, requests } = scriptedModel(
+    Array.from({ length: 20 }, (_, i) => toolStep("ping", `c${i}`))
   );
-  const { types } = await drain(base(model));
-  // Five repeated executions are followed by one summary-only model call.
-  expect(model.doStreamCalls.length).toBe(DOOM_LOOP_STOP + 1);
-  expect(types.filter((t) => t === "tool-result").length).toBe(DOOM_LOOP_STOP);
+  const events = await drain(base(model));
+  expect(requests).toHaveLength(DOOM_LOOP_STOP + 1);
+  expect(types(events).filter((type) => type === "tool-result")).toHaveLength(
+    DOOM_LOOP_STOP
+  );
 });
-
-test("the first prompt carries the harness bar as its tail", async () => {
-  const model = scriptedModel([textStep("hello")]);
-  await drain(base(model));
-  const call = model.doStreamCalls[0];
-  const last = call?.prompt.at(-1);
-  const text =
-    last?.role === "user" && Array.isArray(last.content)
-      ? last.content.map((p) => (p.type === "text" ? p.text : "")).join("")
-      : "";
-  expect(text).toContain("[harness]");
-  expect(text).toContain("step 1/24");
+test("harness bar stays in provider context, outside the persisted transcript", async () => {
+  const { model, requests } = scriptedModel([
+    toolStep("ping", "p"),
+    textStep("hello"),
+  ]);
+  let history: readonly ModelMessage[] = [];
+  await drain(
+    base(model, {
+      onPersist: (messages) => {
+        history = messages;
+      },
+    })
+  );
+  expect(requests[0]?.messages.at(-1)?.content).toContain("step 1/24");
+  expect(JSON.stringify(history)).not.toContain("[harness]");
+  expect(history.filter((message) => message.role === "tool")).toHaveLength(1);
+  expect(history.at(-1)?.content).toBe("hello");
 });
-
-test("a tool that throws surfaces as a tool-error part, not a swallowed result", async () => {
-  const model = scriptedModel([toolStep("boom", "c0"), textStep("recovered")]);
-  const failing = (): ToolSet => ({
-    boom: tool({
-      description: "always fails",
-      inputSchema: jsonSchema<Record<string, never>>({
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      }),
-      execute: (): Promise<{ ok: boolean }> =>
-        Promise.reject(new Error("nope")),
-    }),
-  });
-  const { types } = await drain(base(model, { tools: failing() }));
-  expect(types).toContain("tool-error");
-  expect(types).not.toContain("tool-result");
+test("execution errors surface as typed error events and model-readable failures", async () => {
+  const { model, requests } = scriptedModel([
+    toolStep("ping", "p"),
+    textStep("recovered"),
+  ]);
+  const events = await drain(
+    base(model, {
+      tools: [
+        ping(async () => {
+          throw new Error("nope");
+        }),
+      ],
+    })
+  );
+  expect(types(events)).toContain("tool-error");
+  expect(types(events)).not.toContain("tool-result");
+  expect(JSON.stringify(requests[1]?.messages)).toContain("TOOL_FAILED");
 });
-
-test("a steer that arrives after a text-only step starts another round that sees it", async () => {
-  // The steer is not present when round 1's prepareStep drains; it lands only
-  // on the post-round check (drain call 2), so it can only be answered by a
-  // second round — the path this guards.
+test("late steering starts a continuation on the persisted conversation", async () => {
+  const { model, requests } = scriptedModel([
+    textStep("first"),
+    textStep("done"),
+  ]);
   let drains = 0;
-  const model = scriptedModel([textStep("first"), textStep("done")]);
-  const { text } = await drain(
+  await drain(
     base(model, {
       drainSteers: () => {
         drains += 1;
@@ -150,77 +170,212 @@ test("a steer that arrives after a text-only step starts another round that sees
       },
     })
   );
-  // Two model calls: the first round yielded, the steer forced a second.
-  expect(model.doStreamCalls.length).toBe(2);
-  expect(text).toBe("firstdone");
-  // The steer reached the second call's prompt.
-  const second = JSON.stringify(model.doStreamCalls[1]?.prompt);
-  expect(second).toContain("keep going");
+  expect(requests).toHaveLength(2);
+  expect(JSON.stringify(requests[1]?.messages)).toContain("keep going");
 });
-
-test("three failures with changing inputs force a summary and cannot execute another action", async () => {
-  const steps = Array.from({ length: 6 }, (_, index) => [
-    { type: "stream-start", warnings: [] } as Chunk,
-    {
-      type: "tool-call",
-      toolCallId: `bad-${index}`,
-      toolName: "ping",
-      input: JSON.stringify({ attempt: index }),
-    } as Chunk,
-    {
-      type: "finish",
-      usage: nullUsage,
-      finishReason: { unified: "tool-calls", raw: "tool_use" },
-    } as Chunk,
-  ]);
-  const model = scriptedModel(steps);
+test("changing invalid inputs still force a summary after three failures", async () => {
+  const { model, requests } = scriptedModel(
+    Array.from({ length: 6 }, (_, index) =>
+      toolStep(
+        "ping",
+        `bad-${index}`,
+        JSON.stringify({ duration_s: String(index) })
+      )
+    )
+  );
   let executions = 0;
-  const tools = {
-    ping: tool({
-      inputSchema: jsonSchema({ type: "object" }),
-      execute: async (): Promise<string> => {
-        executions += 1;
-        throw new Error("Repeated failure");
-      },
-    }),
-  };
-  await drain(base(model, { tools }));
-  expect(executions).toBe(3);
-  expect(model.doStreamCalls).toHaveLength(4);
-  expect(model.doStreamCalls[3]?.toolChoice).toEqual({ type: "none" });
-});
-
-test("the final step blocks a tool even when the provider ignores toolChoice none", async () => {
-  const model = scriptedModel([toolStep("ping", "last")]);
-  let executions = 0;
-  const tools = {
-    ping: tool({
-      inputSchema: jsonSchema({ type: "object" }),
-      execute: async () => {
-        executions += 1;
-        return { ok: true };
-      },
-    }),
-  };
-  await drain(base(model, { tools, stepCap: 1 }));
+  const events = await drain(
+    base(model, {
+      tools: [
+        {
+          ...ping(async () => {
+            executions += 1;
+          }),
+          inputSchema: std(Schema.Struct({ duration_s: Schema.Finite })),
+        },
+      ],
+    })
+  );
   expect(executions).toBe(0);
-  expect(model.doStreamCalls[0]?.toolChoice).toEqual({ type: "none" });
+  expect(requests).toHaveLength(4);
+  expect(requests[3]?.modelOptions?.["tool_choice"]).toBe("none");
+  expect(events.filter((event) => event.type === "tool-error")).toHaveLength(3);
 });
-
-test("steering continuations share the original total step budget", async () => {
-  const model = scriptedModel(
+test("summary disables execution even if provider ignores tool_choice", async () => {
+  const { model, requests } = scriptedModel([toolStep("ping", "last")]);
+  let executions = 0;
+  await drain(
+    base(model, {
+      stepCap: 1,
+      tools: [
+        ping(async () => {
+          executions += 1;
+        }),
+      ],
+    })
+  );
+  expect(executions).toBe(0);
+  expect(requests[0]?.modelOptions?.["tool_choice"]).toBe("none");
+});
+test("steering continuations share the total step budget", async () => {
+  const { model, requests } = scriptedModel(
     Array.from({ length: 10 }, () => textStep("answer"))
   );
-  let drainCount = 0;
+  let drains = 0;
   await drain(
     base(model, {
       stepCap: 3,
       drainSteers: () => {
-        drainCount += 1;
-        return drainCount % 2 === 0 ? ["continue"] : [];
+        drains += 1;
+        return drains % 2 === 0 ? ["continue"] : [];
       },
     })
   );
-  expect(model.doStreamCalls).toHaveLength(3);
-  expect(model.doStreamCalls[2]?.toolChoice).toEqual({ type: "none" });
+  expect(requests).toHaveLength(3);
+});
+test("a long tool is outside the provider stall deadline", async () => {
+  const { model } = scriptedModel([toolStep("ping", "slow"), textStep("done")]);
+  const events = await drain(
+    base(model, {
+      stall: { firstChunkMs: 25, chunkMs: 25 },
+      tools: [
+        ping(async () => {
+          await Bun.sleep(90);
+          return { ok: true };
+        }),
+      ],
+    })
+  );
+  expect(types(events)).toContain("tool-result");
+});
+test("provider stall before headers and mid-stream abort the request and finalize", async () => {
+  for (const mid of [false, true]) {
+    const { model } = scriptedModel([]);
+    let closed = false;
+    let aborted = false;
+    model.chatStream = async function* chatStream(options) {
+      const signal =
+        options.request instanceof Request
+          ? options.request.signal
+          : options.request?.signal;
+      try {
+        if (mid) yield textStep("partial")[0]!;
+        const wait = Promise.withResolvers<null>();
+        signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            wait.resolve(null);
+          },
+          { once: true }
+        );
+        await wait.promise;
+      } finally {
+        closed = true;
+      }
+    };
+    const result = await drain(
+      base(model, { stall: { firstChunkMs: 20, chunkMs: 20 } })
+    ).catch(() => "stalled");
+    expect(result).toBe("stalled");
+    expect(aborted).toBe(true);
+    expect(closed).toBe(true);
+  }
+});
+test("cancel during a tool blocks the next tool and waits for cleanup", async () => {
+  const { model } = scriptedModel([
+    [...toolStep("ping", "first").slice(0, -1), ...toolStep("ping", "second")],
+  ]);
+  const controller = new AbortController();
+  let executions = 0;
+  let cleaned = false;
+  await drain(
+    base(model, {
+      abortSignal: controller.signal,
+      tools: [
+        ping(async () => {
+          executions += 1;
+          controller.abort();
+          await Bun.sleep(30);
+          cleaned = true;
+          return { ok: true };
+        }),
+      ],
+    })
+  ).catch(() => {});
+  expect(executions).toBe(1);
+  expect(cleaned).toBe(true);
+});
+test("malformed argument primitives cannot become an empty-object tool call", async () => {
+  const { model } = scriptedModel([
+    toolStep("ping", "primitive", "null"),
+    textStep("done"),
+  ]);
+  let executions = 0;
+  await drain(
+    base(model, {
+      tools: [
+        ping(async () => {
+          executions += 1;
+        }),
+      ],
+    })
+  );
+  expect(executions).toBe(0);
+});
+
+test("Effect tuple schemas reach the adapter with exactly three numeric coordinates", async () => {
+  const { model, requests } = scriptedModel([textStep("done")]);
+  await drain(
+    base(model, {
+      tools: [
+        {
+          ...ping(),
+          inputSchema: std(
+            Schema.Struct({
+              xyz: Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]),
+            })
+          ),
+        },
+      ],
+    })
+  );
+  expect(requests[0]?.tools?.[0]?.inputSchema).toMatchObject({
+    type: "object",
+    properties: {
+      xyz: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: [{ type: "number" }, { type: "number" }, { type: "number" }],
+      },
+    },
+  });
+});
+
+test("leaving the Effect stream early aborts and closes the provider iterator", async () => {
+  const { model } = scriptedModel([]);
+  let aborted = false;
+  let closed = false;
+  model.chatStream = async function* chatStream(options) {
+    const signal =
+      options.request instanceof Request
+        ? options.request.signal
+        : options.request?.signal;
+    signal?.addEventListener(
+      "abort",
+      () => {
+        aborted = true;
+      },
+      { once: true }
+    );
+    try {
+      yield* textStep("hello");
+    } finally {
+      closed = true;
+    }
+  };
+  await Effect.runPromise(Stream.runCollect(base(model).pipe(Stream.take(1))));
+  expect(aborted).toBe(true);
+  expect(closed).toBe(true);
 });

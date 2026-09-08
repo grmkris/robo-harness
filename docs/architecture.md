@@ -5,7 +5,7 @@ Robo Harness has three processes and one wire contract between them.
 ## Processes
 
 - **Python motor owner** (`python/robo_harness`, `robo-io`). A FastAPI service on the Pi. One daemon thread is the single writer to the motors, under one lock, at 30 Hz. It owns the driver (mock or LeRobot/Feetech), the cameras (through the so101-lab `lab_cameras` owner), control leases, bounded moves, measured completion, idempotent request IDs, and fault latching. Camera JPEG encoding runs in per-camera threads, never on the motor loop.
-- **TypeScript coordinator** (`apps/server`, `robo-app`). A Bun HTTP server. It polls the motor owner and each camera independently at 10 Hz, holds the latest observation and per-owner lease state, authenticates callers, runs the agent chat loop over the Vercel AI SDK, records sessions to SQLite and disk, proxies the Rerun viewer, and serves the built workbench. It never touches the motors directly; every motion goes through the Python service.
+- **TypeScript coordinator** (`apps/server`, `robo-app`). A Bun HTTP server. It polls the motor owner and each camera independently at 10 Hz, holds the latest observation and per-owner lease state, authenticates callers, runs the agent chat loop with TanStack AI inside Effect scopes, records sessions to SQLite and disk, proxies the Rerun viewer, and serves the built workbench. It never touches the motors directly; every motion goes through the Python service.
 - **Rerun telemetry worker** (`python/robo_harness/telemetry.py`, `robo-rerun`). A separate process that spawns the Rerun viewer bound to loopback and polls the coordinator's telemetry endpoint. It is off the motor loop by construction.
 
 The React/Vite workbench (`apps/web`) is a client of the coordinator only.
@@ -31,3 +31,7 @@ Chat uses a small capability-gated facade over the low-level protocol. A coordin
 ## Interactive development terminal
 
 The workbench lazy-loads Ghostty's WASM terminal emulator and connects to a coordinator-owned Bun PTY over an authenticated WebSocket. That PTY transports `docker run -it`; the shell runs in the same restricted development image and workspace as one-shot commands. Effect scopes own process cleanup, capability revocation and control release. Reconnecting restores a bounded output history and the existing shell; it never resubmits input. See [decision 0006](decisions/0006-interactive-development-terminal.md).
+
+## Agent runtime
+
+TanStack owns the model/tool cycle behind a server-only domain event adapter. Effect scopes own each stream, provider deadlines and cleanup; Effect Schema validates tool inputs without coercion. Versioned transcripts translate older conversations and close unresolved historical tool calls without executing them. See [decision 0007](decisions/0007-tanstack-ai-effect.md).

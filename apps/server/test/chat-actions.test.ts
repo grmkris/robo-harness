@@ -38,7 +38,9 @@ test("chat moves after slow reasoning with one action, measured completion, and 
   try {
     const id = await start(h);
     const result = await transcript(h, id);
-    expect(result.events.some((e) => e.type === "chat.tool_error")).toBe(false);
+    expect(result.events.filter((e) => e.type === "chat.tool_error")).toEqual(
+      []
+    );
     await h.until(async () => (await h.status()).observation.operator === null);
     const state = await h.status();
     expect(state.observation.operation.status).toBe("completed");
@@ -189,6 +191,79 @@ test("capability discovery is required for optional actions and image input is d
       state.providers.find((p: { id: string }) => p.id === "alibaba")
         .capabilities[0].image_input
     ).toBe(true);
+  } finally {
+    await h.close();
+  }
+}, 15_000);
+
+test("TanStack provider failures are not retried automatically", async () => {
+  const h = await startHarness({
+    modelSteps: [{ status: 500 }, { text: "must not be requested" }],
+  });
+  try {
+    const result = await transcript(h, await start(h));
+    expect(h.requests).toHaveLength(1);
+    expect(result.events.some((event) => event.type === "chat.error")).toBe(
+      true
+    );
+    expect(result.events.some((event) => event.type === "chat.tool")).toBe(
+      false
+    );
+  } finally {
+    await h.close();
+  }
+}, 15_000);
+
+test("optional numeric defaults remain optional on the wire and validate without coercion", async () => {
+  const h = await startHarness({
+    modelSteps: [
+      {
+        calls: [
+          {
+            name: "move_joints",
+            input: { target: { gripper: 42 }, duration_s: null },
+          },
+        ],
+      },
+      {
+        calls: [
+          {
+            name: "move_joints",
+            input: { target: { gripper: 42 }, unexpected: true },
+          },
+        ],
+      },
+      { calls: [{ name: "move_joints", input: { target: { gripper: 42 } } }] },
+      { text: "Measured completion with default duration." },
+    ],
+  });
+  try {
+    const result = await transcript(h, await start(h));
+    expect(
+      result.events.filter((event) => event.type === "chat.tool_error")
+    ).toHaveLength(2);
+    const finished = result.events.find(
+      (event) => event.type === "chat.finished"
+    )?.data;
+    expect(finished?.["completed_actions"]).toBe(1);
+    const tools = h.requests[0]?.["tools"] as {
+      function: {
+        name: string;
+        parameters: {
+          required?: string[];
+          properties: Record<string, unknown>;
+        };
+      };
+    }[];
+    const schema = tools.find((tool) => tool.function.name === "move_joints")
+      ?.function.parameters;
+    expect(schema?.required).not.toContain("duration_s");
+    expect(schema?.properties["duration_s"]).toMatchObject({
+      type: "number",
+      minimum: 0.1,
+      maximum: 10,
+    });
+    expect((await h.status()).observation.operator).toBeNull();
   } finally {
     await h.close();
   }

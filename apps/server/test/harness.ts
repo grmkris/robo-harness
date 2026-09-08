@@ -84,6 +84,7 @@ export interface Harness {
 }
 
 export interface FixtureStep {
+  status?: number;
   text?: string;
   calls?: { name: string; input: unknown; id?: string }[];
   delayMs?: number;
@@ -267,6 +268,11 @@ function startFixture(
       };
       requests.push(body);
       const scripted = modelSteps?.[requests.length - 1];
+      if (scripted?.status)
+        return Response.json(
+          { error: { message: "Fixture provider failure" } },
+          { status: scripted.status }
+        );
       if (scripted?.delayMs) await Bun.sleep(scripted.delayMs);
       const done = modelSteps
         ? !scripted?.calls?.length

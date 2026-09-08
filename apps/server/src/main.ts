@@ -606,6 +606,7 @@ export class App extends Context.Service<App, { readonly port: number }>()(
             agent.cancel(id);
           }
           await robot.stop().catch(() => {});
+          await agent.closeChats();
           await terminals.closeAll();
           if (recording.active) {
             await recording.stopRecording().catch(() => {});

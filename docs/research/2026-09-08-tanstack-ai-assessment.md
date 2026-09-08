@@ -1,5 +1,7 @@
 # Should Robo Harness replace Vercel AI SDK with TanStack AI?
 
+Subsequent decision: the operator selected TanStack AI. [Decision 0007](../decisions/0007-tanstack-ai-effect.md) supersedes this assessment’s recommendation and records the implemented ownership boundaries.
+
 **Recommendation: retain Vercel AI SDK for the current production harness.** TanStack AI is a credible alternative with useful application-level composition, but the evidence does not justify a replacement for our present workload. Revisit it for a specific expansion—such as a richer agent workbench with shared tool UI, durable chat, and coding-agent integrations—and require a bounded compatibility pilot before adopting it.
 
 Prepared **2026-09-08** for Robo Harness's maintainer/operator. Repository baseline: `b02e0c3`. This assessment covers the actual Bun coordinator, React workbench, Alibaba/Grok model paths, Effect schemas, and supervised robot actions. It includes official documentation, published package source, an upstream checkout, and offline executable probes. No provider inference, hardware commands, dependency migration, or deployment was performed.

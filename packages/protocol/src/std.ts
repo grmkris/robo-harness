@@ -1,21 +1,6 @@
-/**
- * Effect Schema → the AI SDK's tool schema.
- *
- * The SDK accepts any Standard Schema whose `~standard` carries both a
- * `validate` (to check the model's arguments) and a `jsonSchema` (to tell the
- * model what to send). Effect produces those from two different calls —
- * `toStandardSchemaV1` and `toStandardJSONSchemaV1` — and each result's
- * `~standard` is missing the other's half. Merging them is the whole job, and
- * it is what keeps Zod out of the repository: `AGENTS.md` reserves schema
- * duties for Effect, and a second schema library would mean two definitions of
- * every tool's arguments, free to drift apart at exactly the boundary an
- * attacker would most like them to.
- *
- * The return type is stated as the SDK's own `StandardSchema<T>` rather than
- * inferred. Effect's schema type carries a dozen internal phantom fields that
- * the SDK's `FlexibleSchema` union cannot match structurally, and this is the
- * one place that mismatch is worth naming instead of propagating.
- */
+/** Effect supplies validation and JSON Schema from one definition. The bridge
+ * joins the two Standard Schema interfaces and rejects excess properties.
+ * Synchronous chat schemas also retain defaults without coercing input. */
 
 import type {
   StandardJSONSchemaV1,
@@ -32,7 +17,9 @@ type ToolSchema<T> = StandardSchemaV1<unknown, T> & {
 export const std = <S extends Schema.Codec<unknown>>(
   schema: S
 ): ToolSchema<S["Type"]> => {
-  const validator = Schema.toStandardSchemaV1(schema);
+  const validator = Schema.toStandardSchemaV1(schema, {
+    parseOptions: { onExcessProperty: "error" },
+  });
   const json = Schema.toStandardJSONSchemaV1(schema);
   const merged = {
     ...validator,

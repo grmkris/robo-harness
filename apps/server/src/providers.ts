@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { ProviderInfo } from "@robo/domain";
+import OpenAI from "openai";
 
 import { modelCapabilities } from "./model-capabilities";
+import { RobotChatAdapter } from "./provider-adapter";
 import { ApiError } from "./robot";
 
 const alibaba =
@@ -159,14 +160,13 @@ export async function resolveModel(provider: string, model?: string) {
   }
   const chosen = model ?? info.model;
   const key = alibabaKey();
-  const client = createOpenAICompatible({
-    name: provider,
+  const client = new OpenAI({
     baseURL:
       provider === "alibaba"
         ? (process.env["ROBO_ALIBABA_URL"] ?? alibaba)
         : "https://api.x.ai/v1",
-    includeUsage: true,
-    ...(provider === "alibaba" && key ? { apiKey: key } : {}),
+    maxRetries: 0,
+    apiKey: provider === "alibaba" ? (key ?? "") : "per-request-token",
     ...(provider === "xai"
       ? {
           fetch: Object.assign(
@@ -190,14 +190,14 @@ export async function resolveModel(provider: string, model?: string) {
     (entry) => entry.model === chosen
   );
   return {
-    model: client(chosen),
+    model: new RobotChatAdapter(client, chosen, provider),
     info: {
       ...info,
       model: chosen,
       vision: capabilities?.image_input ?? false,
     },
-    providerOptions: capabilities?.parallel_control
-      ? { [provider]: { parallel_tool_calls: false } }
+    modelOptions: capabilities?.parallel_control
+      ? { parallel_tool_calls: false }
       : {},
   };
 }

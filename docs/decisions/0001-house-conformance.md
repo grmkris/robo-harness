@@ -12,7 +12,7 @@ Robo Harness was built quickly and correctly for a live demo, but diverged from 
 
 Bring the repository to full house conformance in phases, every commit green and deployable, driving the live arm to verify at each promotion. Isolate the live deployment first (a `robo-harness-deploy` worktree, data outside the checkout). Ship the cheap, live-relevant safety and security fixes before the larger refactor. Then the toolchain, the workspace layout and import graph, the Effect migration (services, config, typed errors, Effect Schema, house-style MCP with a stdio bridge), the remaining coordinator fixes, the Python bar, and deployment/CI.
 
-Stay standalone: no runtime dependency on Invok or the archived harness. Keep the Vercel AI SDK, adopting the house loop shape (`stopWhen`, recovery middleware, a stub model for keyless tests). Keep SQLite on `bun:sqlite` behind a service.
+Stay standalone: no runtime dependency on Invok or the archived harness. The initial Vercel SDK choice is superseded by [decision 0007](0007-tanstack-ai-effect.md): TanStack AI with Effect-owned execution. Keep SQLite on `bun:sqlite` behind a service.
 
 ## Consequences
 

@@ -1,6 +1,21 @@
-import { isStepCount, streamText, wrapLanguageModel } from "ai";
-import type { ModelMessage, TextStreamPart, ToolSet } from "ai";
+import {
+  chat,
+  EventType,
+  isStandardSchema,
+  parseWithStandardSchema,
+  maxIterations,
+  type ChatMiddleware,
+  type ModelMessage,
+  type Tool,
+} from "@tanstack/ai";
+import { Schema } from "effect";
 
+import { closePendingCalls } from "./chat-history";
+import {
+  scopedChatStream,
+  type ChatAdapter,
+  type ChatEvent,
+} from "./chat-stream";
 import { MAX_OUTPUT_TOKENS, STEP_CAP, STREAM_STALL } from "./limits";
 import { stallWatchdog } from "./stall-watchdog";
 import type { StallLimits } from "./stall-watchdog";
@@ -15,12 +30,7 @@ import {
   resultChurn,
   trailingRepeat,
 } from "./stop-conditions";
-import { ToolFailure } from "./tool-errors";
-
-/** A resolved model OBJECT, as `wrapLanguageModel` accepts it — a bare id
- *  (the other arm of the SDK's `LanguageModel` union) would route through the
- *  gateway, so the type refuses one. */
-type ModelObject = Parameters<typeof wrapLanguageModel>[0]["model"];
+import { describeToolError, ToolFailure } from "./tool-errors";
 
 /** A round that ends without a tool call yields to the operator. It runs
  *  again only when a steer arrived after the model stopped calling tools;
@@ -31,9 +41,9 @@ const MAX_STEER_ROUNDS = 8;
 const HARNESS_MARK = "[harness]";
 
 export interface ChatLoopOptions {
-  readonly model: ModelObject;
+  readonly model: ChatAdapter;
   readonly instructions: string;
-  readonly tools: ToolSet;
+  readonly tools: Tool[];
   readonly abortSignal: AbortSignal;
   /** The turn's starting transcript: prior history plus the new user text,
    *  already appended by the host. The loop owns it from here. */
@@ -52,9 +62,7 @@ export interface ChatLoopOptions {
     stepNumber: number,
     summaryOnly: boolean
   ) => string[];
-  readonly providerOptions?: Parameters<
-    typeof streamText
-  >[0]["providerOptions"];
+  readonly modelOptions?: Record<string, unknown>;
   readonly stepCap?: number | undefined;
   readonly stall?: StallLimits | undefined;
 }
@@ -137,129 +145,229 @@ const renderBar = (
   return `${HARNESS_MARK}\n${lines.join("\n")}`;
 };
 
-/**
- * One chat turn on the SDK's step loop: a single `streamText` with the step
- * cap and a reserved summary step, a stall watchdog over the raw
- * provider stream, and a `prepareStep` that injects captured frames, drains
- * steers and appends the harness bar. Wrapped in a thin rounds loop so a
- * steer that arrives after the model stopped calling tools starts another
- * round on the conversation so far.
- */
-export const runChatLoop = (
-  opts: ChatLoopOptions
-): AsyncIterable<TextStreamPart<ToolSet>> => {
-  const stepCap = opts.stepCap ?? STEP_CAP;
-  const model = wrapLanguageModel({
-    model: opts.model,
-    middleware: [stallWatchdog(opts.stall ?? STREAM_STALL)],
-  });
-  const transcript: ModelMessage[] = [...opts.history];
-  const completedSteps: StepLike[] = [];
-  let totalSteps = 0;
-  let summaryOnly = false;
-  let allowed = new Set(Object.keys(opts.tools));
-  const guardedTools: ToolSet = Object.fromEntries(
-    Object.entries(opts.tools).map(([name, definition]) => {
-      const { execute } = definition;
-      return [
-        name,
-        execute
-          ? {
-              ...definition,
-              execute: async (input, context) => {
-                if (summaryOnly || !allowed.has(name))
-                  throw new ToolFailure({
-                    code: "TOOL_NOT_AVAILABLE",
-                    detail:
-                      "Tools are disabled for this step. Summarize the measured results and failures.",
-                  });
-                return await execute(input, context);
+/** TanStack owns the agentic cycle; Effect owns its resource lifetime. */
+export const runChatLoop = (opts: ChatLoopOptions) =>
+  scopedChatStream(
+    (controller) => ({
+      async *[Symbol.asyncIterator](): AsyncGenerator<ChatEvent> {
+        const stepCap = opts.stepCap ?? STEP_CAP;
+        const adapter = stallWatchdog(opts.model, opts.stall ?? STREAM_STALL);
+        let transcript = [...opts.history];
+        const completedSteps: StepLike[] = [];
+        let totalSteps = 0;
+        let summaryOnly = false;
+        let stepOpen = false;
+        const queue: ChatEvent[] = [];
+        const calls = new Map<string, { name: string; args: string }>();
+        const parseArgs = (args: string): unknown => {
+          try {
+            return JSON.parse(args);
+          } catch {
+            return args;
+          }
+        };
+        const finishStep = () => {
+          if (stepOpen) {
+            queue.push({ type: "finish-step" });
+            totalSteps += 1;
+            stepOpen = false;
+          }
+        };
+        const snapshot = (messages: readonly ModelMessage[]) => {
+          transcript = [...messages];
+          opts.onPersist(transcript);
+        };
+        let allowed = new Set<string>();
+        const guardedTools = opts.tools.map((definition): Tool => ({
+          ...definition,
+          execute: async (input: unknown, context) => {
+            controller.signal.throwIfAborted();
+            if (summaryOnly || !allowed.has(definition.name))
+              throw new ToolFailure({
+                code: "TOOL_NOT_AVAILABLE",
+                detail:
+                  "Tools are disabled for this step. Summarize the measured outcome.",
+              });
+            const output: unknown = await definition.execute?.(input, context);
+            return output;
+          },
+        }));
+        const middleware: ChatMiddleware = {
+          name: "robo-harness",
+          onConfig: (ctx, config) => {
+            if (ctx.phase !== "beforeModel") return;
+            controller.signal.throwIfAborted();
+            finishStep();
+            snapshot(config.messages);
+            summaryOnly =
+              totalSteps >= stepCap - 1 ||
+              isDoomLoop(completedSteps) ||
+              isCycleLoop(completedSteps) ||
+              failedActionSteps(completedSteps) >= 3;
+            allowed = new Set(
+              opts.prepareTools?.(totalSteps, summaryOnly) ??
+                (summaryOnly ? [] : guardedTools.map((t) => t.name))
+            );
+            const steers = opts.drainSteers();
+            const messages = [
+              ...config.messages,
+              ...opts.drainImages(),
+              ...steerMessages(steers),
+            ];
+            snapshot(messages);
+            stepOpen = true;
+            queue.push({ type: "start-step" });
+            return {
+              messages,
+              providerMessages: withHarnessBar(
+                trim(messages),
+                renderBar(totalSteps, stepCap, completedSteps, steers.length) +
+                  (summaryOnly
+                    ? "\nTools are disabled. Explain the measured outcome or recurring failure; do not claim an unfinished action succeeded."
+                    : "")
+              ),
+              tools: guardedTools.filter((t) => allowed.has(t.name)),
+              modelOptions: {
+                ...opts.modelOptions,
+                max_tokens: MAX_OUTPUT_TOKENS,
+                ...(summaryOnly ? { tool_choice: "none" } : {}),
               },
+            };
+          },
+          onBeforeToolCall: (_ctx, info) => {
+            if (controller.signal.aborted)
+              return {
+                type: "skip",
+                result: { error: "CANCELLED: Operator stopped this run." },
+              };
+            // The compatible adapter removes optional nulls before dispatch.
+            // Validate the original deltas, not its normalized TOOL_CALL_END.
+            try {
+              const raw = Schema.decodeUnknownSync(
+                Schema.Record(Schema.String, Schema.Unknown)
+              )(
+                JSON.parse(
+                  calls.get(info.toolCallId)?.args ??
+                    info.toolCall.function.arguments
+                )
+              );
+              const schema = guardedTools.find(
+                (tool) => tool.name === info.toolName
+              )?.inputSchema;
+              const input = isStandardSchema(schema)
+                ? parseWithStandardSchema<unknown>(schema, raw)
+                : raw;
+              return { type: "transformArgs", args: input };
+            } catch (error) {
+              const failure = describeToolError(
+                `Input validation failed: ${error instanceof Error ? error.message : "Invalid JSON object"}`
+              );
+              return {
+                type: "skip",
+                result: { error: `${failure.code}: ${failure.message}` },
+              };
             }
-          : definition,
-      ];
-    })
-  );
-  const runRound = (): AsyncIterable<TextStreamPart<ToolSet>> => {
-    const result = streamText({
-      model,
-      instructions: opts.instructions,
-      messages: transcript,
-      tools: guardedTools,
-      providerOptions: opts.providerOptions ?? {},
-      stopWhen: [
-        isStepCount(Math.max(1, stepCap - totalSteps)),
-        () => summaryOnly,
-      ],
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-      abortSignal: opts.abortSignal,
-      maxRetries: 0,
-      prepareStep: ({ messages }) => {
-        summaryOnly =
-          totalSteps >= stepCap - 1 ||
-          isDoomLoop(completedSteps) ||
-          isCycleLoop(completedSteps) ||
-          failedActionSteps(completedSteps) >= 3;
-        allowed = new Set(
-          opts.prepareTools?.(totalSteps, summaryOnly) ??
-            (summaryOnly ? [] : Object.keys(opts.tools))
-        );
-        // Frames captured in the prior step's tools, then steers, become real
-        // transcript messages (persisted); the bar is a transient tail.
-        const images = opts.drainImages();
-        if (images.length > 0) {
-          transcript.push(...images);
-        }
-        const steers = opts.drainSteers();
-        if (steers.length > 0) {
+          },
+          onChunk: (_ctx, chunk) => {
+            if (chunk.type === EventType.TEXT_MESSAGE_CONTENT)
+              queue.push({ type: "text-delta", text: chunk.delta });
+            if (chunk.type === "TOOL_CALL_START")
+              calls.set(chunk.toolCallId, {
+                name: chunk.toolCallName,
+                args: "",
+              });
+            if (chunk.type === EventType.TOOL_CALL_ARGS) {
+              const call = calls.get(chunk.toolCallId);
+              if (call) call.args += chunk.delta;
+            }
+            if (chunk.type === "TOOL_CALL_END") {
+              const call = calls.get(chunk.toolCallId);
+              if (call)
+                queue.push({
+                  type: "tool-call",
+                  toolCallId: chunk.toolCallId,
+                  toolName: call.name,
+                  input: parseArgs(call.args),
+                });
+            }
+            if (chunk.type === EventType.RUN_ERROR)
+              throw new Error("Provider stream failed");
+          },
+          onToolPhaseComplete: (_ctx, info) => {
+            const content: { type: string; error?: unknown }[] = [];
+            const results = info.results.map((result) => {
+              // The aggregate includes validation errors that bypass execution hooks.
+              const failure = Schema.decodeUnknownOption(
+                Schema.Struct({ error: Schema.String })
+              )(result.result);
+              if (failure._tag === "Some") {
+                const described = describeToolError(failure.value.error);
+                const error = `${described.code}: ${described.message}`;
+                result.result = { error };
+                content.push({ type: "tool-error", error });
+                queue.push({
+                  type: "tool-error",
+                  toolCallId: result.toolCallId,
+                  toolName: result.toolName,
+                  error,
+                });
+              } else
+                queue.push({
+                  type: "tool-result",
+                  toolCallId: result.toolCallId,
+                  toolName: result.toolName,
+                  output: result.result,
+                });
+              return { toolName: result.toolName, output: result.result };
+            });
+            completedSteps.push({
+              toolCalls: info.toolCalls.map((call) => ({
+                toolName: call.function.name,
+                input: parseArgs(call.function.arguments),
+              })),
+              toolResults: results,
+              content,
+            });
+          },
+          onShouldContinue: (_ctx, state) =>
+            state.iterationCount === 0 ||
+            (!summaryOnly && totalSteps + 1 < stepCap),
+          onFinish: (ctx) => {
+            snapshot(ctx.messages);
+            finishStep();
+          },
+          onAbort: (ctx) => {
+            snapshot(closePendingCalls(ctx.messages));
+            finishStep();
+          },
+          onError: (ctx) => {
+            snapshot(closePendingCalls(ctx.messages));
+            finishStep();
+          },
+        };
+        for (let round = 0; round < MAX_STEER_ROUNDS; round += 1) {
+          const stream = chat({
+            debug: false,
+            adapter,
+            messages: transcript,
+            systemPrompts: [opts.instructions],
+            tools: guardedTools,
+            middleware: [middleware],
+            abortController: controller,
+            agentLoopStrategy: maxIterations(Math.max(1, stepCap - totalSteps)),
+          });
+          for await (const _chunk of stream) {
+            yield* queue.splice(0);
+          }
+          yield* queue.splice(0);
+          controller.signal.throwIfAborted();
+          if (summaryOnly || totalSteps >= stepCap) break;
+          const steers = opts.drainSteers();
+          if (steers.length === 0) break;
           transcript.push(...steerMessages(steers));
-        }
-        if (images.length > 0 || steers.length > 0) {
           opts.onPersist(transcript);
         }
-        // `messages` carries the SDK's own accumulated view; append our
-        // extra context and the fresh bar to it.
-        const base = messages.filter((message) => !isBar(message));
-        for (const message of [...images, ...steerMessages(steers)]) {
-          base.push(message);
-        }
-        return {
-          activeTools: [...allowed],
-          ...(summaryOnly ? { toolChoice: "none" as const } : {}),
-          messages: withHarnessBar(
-            trim(base),
-            renderBar(totalSteps, stepCap, completedSteps, steers.length) +
-              (summaryOnly
-                ? "\nTools are disabled. Explain the measured outcome or recurring failure; do not claim an unfinished action succeeded."
-                : "")
-          ),
-        };
       },
-      onStepFinish: (step) => {
-        totalSteps += 1;
-        completedSteps.push(step);
-        transcript.push(...step.response.messages);
-        opts.onPersist(transcript);
-      },
-    });
-    return result.fullStream;
-  };
-
-  return (async function* rounds(): AsyncGenerator<TextStreamPart<ToolSet>> {
-    for (let round = 0; round < MAX_STEER_ROUNDS; round += 1) {
-      opts.abortSignal.throwIfAborted();
-      yield* runRound();
-      // A steer that landed after the model stopped calling tools is not seen
-      // by any `prepareStep`; run one more round so it is answered.
-      if (summaryOnly || totalSteps >= stepCap) {
-        break;
-      }
-      const steers = opts.drainSteers();
-      if (steers.length === 0) {
-        break;
-      }
-      transcript.push(...steerMessages(steers));
-      opts.onPersist(transcript);
-    }
-  })();
-};
+    }),
+    opts.abortSignal
+  );

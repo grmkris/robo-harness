@@ -50,7 +50,9 @@ export const describeToolError = (error: unknown): ToolErrorDescription => {
       ? error.message
       : "Tool execution failed";
   if (
-    /Invalid input for tool|Type validation failed|SchemaError\(/u.test(raw)
+    /Input validation failed|Failed to parse tool arguments|Invalid input for tool|Type validation failed|SchemaError\(/u.test(
+      raw
+    )
   ) {
     const path = /at (?<path>\["[^"\n]{1,60}"\])/u.exec(raw)?.groups?.["path"];
     const expected = /Expected (?<expected>number|boolean|string)/u.exec(raw)
