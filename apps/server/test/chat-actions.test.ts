@@ -270,3 +270,96 @@ test("optional numeric defaults remain optional on the wire and validate without
     await h.close();
   }
 }, 15_000);
+
+test("visual exploration retains before and after camera evidence across measured joint probes", async () => {
+  const views: FixtureStep = {
+    calls: [
+      { name: "observe", input: {} },
+      { name: "capture", input: { camera: "workspace" } },
+      { name: "capture", input: { camera: "wrist" } },
+    ],
+  };
+  const h = await startHarness({
+    modelSteps: [
+      views,
+      {
+        calls: [
+          {
+            name: "move_joints",
+            input: { target: { shoulder_pan: 1 }, duration_s: 1 },
+          },
+        ],
+      },
+      views,
+      {
+        calls: [
+          {
+            name: "move_joints",
+            input: { target: { shoulder_pan: 1.5 }, duration_s: 1 },
+          },
+        ],
+      },
+      views,
+      {
+        text: "Compared camera evidence from two measured joint probes; no grasp claimed.",
+      },
+    ],
+  });
+  try {
+    const response = await h.request("/api/chat", {
+      provider: "alibaba",
+      model: "fixture",
+      text: "Explore how a small shoulder movement changes the camera view, and retain the observations.",
+    });
+    expect(response.status).toBe(200);
+    const { session_id: id } = (await response.json()) as {
+      session_id: string;
+    };
+    const result = await transcript(h, id);
+    expect(
+      result.events.filter((event) => event.type === "chat.tool_error")
+    ).toEqual([]);
+    const observations = result.events
+      .filter(
+        (event) =>
+          event.type === "chat.tool_result" && event.data["name"] === "observe"
+      )
+      .map(
+        (event) =>
+          event.data["output"] as {
+            measured: { shoulder_pan: number };
+            operation: { status: string } | null;
+          }
+      );
+    expect(observations).toHaveLength(3);
+    expect(observations[0]?.measured.shoulder_pan).toBe(0);
+    expect(observations[1]?.operation?.status).toBe("completed");
+    expect(observations[1]?.measured.shoulder_pan).toBeCloseTo(1, 2);
+    expect(observations[2]?.measured.shoulder_pan).toBeCloseTo(1.5, 2);
+    for (const [requestIndex, imageCount] of [
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ] as const) {
+      const messages = JSON.stringify(h.requests[requestIndex]?.["messages"]);
+      expect([...messages.matchAll(/data:image\/jpeg;base64,/g)]).toHaveLength(
+        imageCount
+      );
+    }
+    const captureIds = result.events
+      .filter(
+        (event) =>
+          event.type === "chat.tool_result" && event.data["name"] === "capture"
+      )
+      .map((event) => (event.data["output"] as { id: string }).id);
+    expect(new Set(captureIds).size).toBe(6);
+    expect(
+      result.events.find((event) => event.type === "chat.finished")?.data[
+        "completed_actions"
+      ]
+    ).toBe(2);
+    await h.until(async () => (await h.status()).observation.operator === null);
+  } finally {
+    await h.close();
+  }
+}, 15_000);

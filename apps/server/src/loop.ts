@@ -10,6 +10,7 @@ import {
 } from "@tanstack/ai";
 import { Schema } from "effect";
 
+import { trimContext } from "./chat-context";
 import { closePendingCalls } from "./chat-history";
 import {
   scopedChatStream,
@@ -82,22 +83,6 @@ const withHarnessBar = (
   ...messages.filter((message) => !isBar(message)),
   { role: "user", content: bar },
 ];
-/** Keep the wire prompt bounded by dropping whole user-delimited turns from
- *  the front, so tool-call/result pairs are never split. */
-const TRANSCRIPT_CHAR_CAP = 100_000;
-const trim = (messages: readonly ModelMessage[]): ModelMessage[] => {
-  let kept = [...messages];
-  let total = JSON.stringify(kept).length;
-  while (total > TRANSCRIPT_CHAR_CAP && kept.length > 4) {
-    const next = kept.findIndex((m, i) => i > 0 && m.role === "user");
-    if (next < 1) {
-      break;
-    }
-    kept = kept.slice(next);
-    total = JSON.stringify(kept).length;
-  }
-  return kept;
-};
 const steerMessages = (steers: readonly string[]): ModelMessage[] =>
   steers.map((text, index) => ({
     role: "user" as const,
@@ -233,7 +218,7 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
             return {
               messages,
               providerMessages: withHarnessBar(
-                trim(messages),
+                trimContext(messages),
                 renderBar(totalSteps, stepCap, completedSteps, steers.length) +
                   (opts.runtimeContext ? `\n${opts.runtimeContext()}` : "") +
                   (summaryOnly
