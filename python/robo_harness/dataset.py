@@ -17,7 +17,10 @@ MAX_GAP_MS = 250
 def resample(samples: list[dict[str, Any]], fps: float) -> list[dict[str, Any]]:
     if not samples:
         raise ValueError("Recording has no samples")
-    times = np.array([sample["sample_time_ms"] for sample in samples], dtype=float)
+    field = "time_ms" if "time_ms" in samples[0] else "sample_time_ms"
+    if any(field not in sample for sample in samples):
+        raise ValueError("Recording mixes clock axes")
+    times = np.array([sample[field] for sample in samples], dtype=float)
     if not np.all(np.isfinite(times)) or np.any(np.diff(times) <= 0):
         raise ValueError("Recording timestamps must be finite and strictly increasing")
     if np.any(np.diff(times) > MAX_GAP_MS):

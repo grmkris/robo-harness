@@ -151,3 +151,9 @@ export {
   TerminalClientMessage,
   TerminalServerMessage,
 } from "./terminal";
+export {
+  RecordingId,
+  RecordingExport,
+  RecordingArtifact,
+  RecordingDetail,
+} from "./recording";

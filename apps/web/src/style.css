@@ -1169,3 +1169,126 @@ h2 {
   white-space: nowrap;
   border: 0;
 }
+
+.perception-status {
+  margin: 0 18px 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.recording-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.recording-editor {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #b8c8a8;
+  border-radius: 6px;
+  background: #edf2e5;
+  min-width: 0;
+}
+.recording-editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.recording-editor h3 {
+  font-size: 17px;
+  font-weight: 550;
+  margin: 6px 0 0;
+}
+.recording-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.recording-preview figure {
+  margin: 0;
+  min-width: 0;
+  background: #18261d;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.recording-preview img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+}
+.recording-preview figcaption {
+  padding: 6px 8px;
+  color: #c3d5b4;
+  font: 9px var(--mono);
+}
+.recording-interval {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.recording-interval label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.recording-interval input,
+.recording-interval select {
+  width: 100%;
+}
+.recording-editor .recording-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.recording-check input {
+  width: auto;
+}
+.recording-editor input[type="range"] {
+  width: 100%;
+  padding: 0;
+  accent-color: #607d43;
+}
+.recording-bookmarks {
+  display: grid;
+  max-height: 160px;
+  overflow-y: auto;
+  gap: 4px;
+  margin-top: 8px;
+}
+.recording-bookmarks button {
+  text-align: left;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.recording-bookmarks time {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+.recording-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.recording-downloads {
+  display: grid;
+  gap: 10px;
+}
+.recording-downloads > div {
+  display: grid;
+  gap: 3px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.recording-downloads a {
+  font-weight: 600;
+  font-size: 13px;
+}
+.recording-editor small {
+  color: var(--muted);
+  line-height: 1.5;
+}

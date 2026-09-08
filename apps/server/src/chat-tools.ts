@@ -40,11 +40,22 @@ const schemas = {
   perceive: toolSchemas.perceive,
   recording_start: toolSchemas.recording_start,
   recording_stop: toolSchemas.recording_stop,
+  recording_list: toolSchemas.recording_list,
+  recording_inspect: toolSchemas.recording_inspect,
+  recording_frame: toolSchemas.recording_frame,
+  recording_export: toolSchemas.recording_export,
   shell: toolSchemas.shell,
 };
 type ChatToolName = keyof typeof schemas;
 const groups = {
-  recording: ["recording_start", "recording_stop"],
+  recording: [
+    "recording_start",
+    "recording_stop",
+    "recording_list",
+    "recording_inspect",
+    "recording_frame",
+    "recording_export",
+  ],
   perception: ["perceive"],
   development: ["shell"],
   cartesian: ["move_cartesian"],
@@ -63,6 +74,7 @@ const mutations = new Set<ChatToolName>([
   "perceive",
   "recording_start",
   "recording_stop",
+  "recording_export",
 ]);
 const jointExample = '{"target":{"elbow_flex":96.3},"duration_s":1}';
 
@@ -227,15 +239,18 @@ export const createChatTools = (options: {
         return observation;
       }
       const output = await executeTool(name, input, options.principal, signal);
-      if (name === "capture") {
+      if (name === "capture" || name === "recording_frame") {
         const frame = Schema.decodeUnknownSync(Frame)(output);
         if (options.vision) options.onImage(frame);
         const { base64: _base64, ...metadata } = frame;
         return {
           ...metadata,
-          note: options.vision
-            ? "Image supplied in the next observation message."
-            : "This model has no image input enabled. Do not infer object positions from this metadata.",
+          note:
+            name === "recording_frame"
+              ? "Archived recording frame. Do not use it as a current observation for motion."
+              : options.vision
+                ? "Image supplied in the next observation message."
+                : "This model has no image input enabled. Do not infer object positions from this metadata.",
         };
       }
       return output;

@@ -58,6 +58,50 @@ browser(
     + "if(await page.getByLabel('Operator token').count())throw new Error('Unexpected login prompt');",
     "workbench opens without a token",
 )
+if os.environ.get("ROBO_BROWSER_RECORDING_ONLY") == "1":
+    browser(
+        r"""
+if(!(await page.getByRole('button',{name:'Segment',exact:true}).isDisabled()))throw new Error('Unconfigured perception should be disabled');
+await page.getByText('Depth previews are relative, not measurements in meters.',{exact:false}).waitFor();
+await page.getByRole('button',{name:'recordings',exact:true}).click();
+await page.getByLabel('Session label').fill('Browser recording export');
+await page.getByRole('button',{name:'Start recording',exact:true}).click();
+await page.waitForFunction(async()=>{const s=await(await fetch('/api/status')).json();return s.recording?.frames>=8;},null,{timeout:15000});
+await page.getByRole('button',{name:/Stop recording/}).click();
+await page.getByRole('button',{name:'Review & export',exact:true}).first().click();
+await page.getByLabel('Recording editor',{exact:true}).waitFor();
+await page.getByLabel('Task instruction',{exact:true}).fill('Open the mock gripper');
+await page.getByLabel('Observed outcome',{exact:true}).selectOption('success');
+await page.getByLabel('Human intervention during this interval',{exact:true}).check();
+await page.getByRole('button',{name:'Create MP4',exact:true}).click();
+await page.getByRole('link',{name:/Download MP4/}).first().waitFor({timeout:45000});
+const url=await page.getByRole('link',{name:/Download MP4/}).first().getAttribute('href');
+const result=await page.evaluate(async url=>{const r=await fetch(url);return {status:r.status,type:r.headers.get('content-type'),size:(await r.arrayBuffer()).byteLength};},url);
+if(result.status!==200||result.type!=='video/mp4'||result.size<1000)throw new Error('MP4 download failed');
+""",
+        "recording start/stop, review labels, and MP4 download",
+    )
+    browser(
+        r"""
+const aligned=page.getByRole('button',{name:'Use first interval with aligned frames',exact:true});
+if(await aligned.count())await aligned.click();
+await page.getByRole('button',{name:'Export LeRobot',exact:true}).click();
+await page.getByRole('link',{name:/Download LeRobot dataset/}).first().waitFor({timeout:45000});
+const url=await page.getByRole('link',{name:/Download LeRobot dataset/}).first().getAttribute('href');
+const result=await page.evaluate(async url=>{const r=await fetch(url);return {status:r.status,size:(await r.arrayBuffer()).byteLength};},url);
+if(result.status!==200||result.size<1000)throw new Error('Dataset download failed');
+await page.setViewportSize({width:390,height:844});
+if(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+2))throw new Error('Recording editor overflows on mobile');
+await page.getByRole('button',{name:'STOP / HOLD'}).scrollIntoViewIfNeeded();
+await page.setViewportSize({width:1440,height:1100});
+""",
+        "LeRobot export/download and recording editor on mobile",
+    )
+    result = subprocess.run(["expect-cli", "screenshot", "--full-page"], capture_output=True, text=True, timeout=60, env=EXPECT_ENV)
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    print(result.stdout.strip())
+    sys.exit(0)
 if os.environ.get("ROBO_BROWSER_TERMINAL_ONLY") == "1":
     browser(
         r"""
@@ -208,10 +252,7 @@ await page.waitForFunction(()=>document.querySelector('[aria-label="Increase gri
 )
 browser(
     r"""
-await page.getByRole('button',{name:'Segment',exact:true}).click({noWaitAfter:true,timeout:10000});
-await page.getByRole('alert').waitFor();
-if(!(await page.getByRole('alert').innerText()).includes('Configure a perception'))throw new Error('Missing perception setup did not produce an actionable error');
-await page.getByRole('button',{name:'Dismiss error'}).click({noWaitAfter:true,timeout:10000});
+if(!(await page.getByRole('button',{name:'Segment',exact:true}).isDisabled()))throw new Error('Perception should be unavailable without an approved budget');
 await page.getByRole('button',{name:'recordings',exact:true}).click({noWaitAfter:true,timeout:10000});
 await page.getByLabel('Session label').fill('Browser validation');
 await page.getByRole('button',{name:'Start recording',exact:true}).click({noWaitAfter:true,timeout:10000});

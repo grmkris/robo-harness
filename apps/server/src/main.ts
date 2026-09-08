@@ -13,6 +13,12 @@ import { config } from "./config";
 import { decode, isUuid, Uuid } from "./decode";
 import { budget, setBudget, perceptionConfig } from "./perception";
 import { catalog } from "./providers";
+import {
+  inspectRecording,
+  recordingFrame,
+  recordingDownload,
+  closeExports,
+} from "./recording-library";
 import * as recording from "./recordings";
 import * as robot from "./robot";
 import { db, events, subscribe } from "./store";
@@ -336,6 +342,8 @@ async function handle(req: Request): Promise<Response | undefined> {
       if ("program" in principal && name === "shell") {
         throw new robot.ApiError("Nested development shells are disabled", 403);
       }
+      // The exporter owns a 120-second deadline and reports its terminal state.
+      if (name === "recording_export") server.timeout(req, 130);
       return json(
         await executeTool(name, await parse(req), principal, req.signal)
       );
@@ -440,6 +448,53 @@ async function handle(req: Request): Promise<Response | undefined> {
     }
     if (path === "/api/recordings") {
       return json(recording.recordings());
+    }
+    if (path.startsWith("/api/recordings/")) {
+      const parts = path.split("/");
+      const id = parts[3] ?? "";
+      if (!isUuid(id)) return json({ error: "Invalid recording" }, 400);
+      if (parts.length === 4) return json(await inspectRecording(id));
+      if (parts[4] === "frame" && parts.length === 5) {
+        const camera = url.searchParams.get("camera") ?? "workspace";
+        const time = Number(url.searchParams.get("time_s") ?? 0);
+        if (
+          !["workspace", "wrist"].includes(camera) ||
+          !Number.isFinite(time) ||
+          time < 0
+        )
+          return json({ error: "Invalid frame selection" }, 400);
+        const frame = await recordingFrame(id, camera, time);
+        return new Response(Buffer.from(frame.base64, "base64"), {
+          headers: { "Content-Type": frame.media_type },
+        });
+      }
+      if (parts[4] === "exports" && parts.length === 7) {
+        const exportId = parts[5] ?? "",
+          filename = parts[6];
+        if (
+          !isUuid(exportId) ||
+          (filename !== "clip.mp4" && filename !== "dataset.zip")
+        )
+          return json({ error: "Invalid export" }, 400);
+        const detail = await inspectRecording(id);
+        if (
+          !detail.exports.some(
+            (item) => item.id === exportId && item.state === "completed"
+          )
+        )
+          return json({ error: "Export is not complete" }, 404);
+        const file = recordingDownload(id, exportId, filename);
+        return (await file.exists())
+          ? new Response(file, {
+              headers: {
+                "Content-Type": filename.endsWith("mp4")
+                  ? "video/mp4"
+                  : "application/zip",
+                "Content-Disposition": `attachment; filename="robo-${id}-${filename}"`,
+              },
+            })
+          : json({ error: "Export unavailable" }, 404);
+      }
     }
     if (path.startsWith("/api/recordings/") && path.endsWith("/replay.rrd")) {
       const id = path.split("/")[3];
@@ -551,7 +606,11 @@ function sampleTick(): void {
   sampling = true;
   void robot
     .sample()
-    .then(() => recording.recordSample())
+    .then(() => {
+      // Disk writes must not delay observation polling. The recorder owns its
+      // single outstanding sample and counts backpressure explicitly.
+      void recording.recordSample();
+    })
     .catch((error: unknown) => {
       console.error(
         "Sampler failure:",
@@ -610,6 +669,7 @@ export class App extends Context.Service<App, { readonly port: number }>()(
           await robot.stop().catch(() => {});
           await agent.closeChats();
           await terminals.closeAll();
+          await closeExports();
           if (recording.active) {
             await recording.stopRecording().catch(() => {});
           }

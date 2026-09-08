@@ -1,4 +1,4 @@
-import { joints, type Joint } from "@robo/domain";
+import { joints, RecordingId, RecordingExport, type Joint } from "@robo/domain";
 import { Effect, Schema } from "effect";
 
 import { std } from "./std";
@@ -70,6 +70,14 @@ export const toolSchemas = {
     label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
   }),
   recording_stop: Schema.Struct({}),
+  recording_list: Schema.Struct({}),
+  recording_inspect: Schema.Struct({ id: RecordingId }),
+  recording_frame: Schema.Struct({
+    id: RecordingId,
+    camera: Camera,
+    time_s: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
+  recording_export: RecordingExport,
   shell: Schema.Struct({
     command: Schema.String.check(
       Schema.isMinLength(1),
@@ -98,7 +106,14 @@ export const toolInputSchema = (name: ToolName) => {
       : json;
   }
   if (
-    ["observe", "release", "renew", "stop", "recording_stop"].includes(name)
+    [
+      "observe",
+      "release",
+      "renew",
+      "stop",
+      "recording_stop",
+      "recording_list",
+    ].includes(name)
   ) {
     return { type: "object", properties: {}, additionalProperties: false };
   }

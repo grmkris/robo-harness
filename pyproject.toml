@@ -9,6 +9,7 @@ dependencies = [
   "numpy>=2,<3",
   "scipy>=1.14,<2",
   "pillow>=11,<13",
+  "av==15.1.0",
   "httpx>=0.28,<1",
   "rerun-sdk==0.30.1",
 ]

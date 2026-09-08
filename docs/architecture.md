@@ -35,3 +35,7 @@ The workbench lazy-loads Ghostty's WASM terminal emulator and connects to a coor
 ## Agent runtime
 
 TanStack owns the model/tool cycle behind a server-only domain event adapter. Effect scopes own each stream, provider deadlines and cleanup; Effect Schema validates tool inputs without coercion. Versioned transcripts translate older conversations and close unresolved historical tool calls without executing them. See [decision 0007](decisions/0007-tanstack-ai-effect.md).
+
+## Recording derivatives and perception
+
+Catalog adapters connect SAM 3 masks and Depth Anything V2 relative-depth previews through a scoped fal queue request. Recording v2 timestamps observations before disk I/O, drains a bounded event writer, and preserves originals when creating MP4 or native LeRobot interval exports. Offline export process groups are owned by Effect and receive no provider credentials. See [decision 0008](decisions/0008-perception-and-recording.md) and [recording workflow](recordings.md).

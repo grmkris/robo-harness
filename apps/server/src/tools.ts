@@ -2,7 +2,12 @@ import { toolSchemas, type MoveInput, type ToolName } from "@robo/protocol";
 
 import { decode } from "./decode";
 import { perceive } from "./perception";
-import { startRecording, stopRecording } from "./recordings";
+import {
+  inspectRecording,
+  recordingFrame,
+  exportRecording,
+} from "./recording-library";
+import { startRecording, stopRecording, recordings } from "./recordings";
 import * as robot from "./robot";
 import { shell } from "./shell";
 
@@ -28,6 +33,13 @@ export const descriptions: Record<ToolName, string> = {
   recording_start: "Begin a camera/action recording with explicit provenance.",
   recording_stop:
     "Stop capture and preserve a recording for LeRobot export and Rerun replay.",
+  recording_list: "List recorded experiments and their capture status.",
+  recording_inspect:
+    "Read a recording timeline, task bookmarks and available exports. Times are seconds from the first sample.",
+  recording_frame:
+    "Read an archived camera frame at a recording time. This is historical evidence, never a current robot observation.",
+  recording_export:
+    "Export an interval as an MP4 or a LeRobot dataset. Preserve original timing for training. Label task, outcome and intervention honestly; never infer success from a completed joint move alone. Returns an authenticated download URL; never uploads automatically.",
   shell:
     "Run development code in an isolated Netcup container or configured Pi development account. No deployed hardware configuration access.",
 };
@@ -67,6 +79,19 @@ export async function executeTool(
     }
     case "perceive": {
       return perceive(input as Parameters<typeof perceive>[0], signal);
+    }
+    case "recording_list": {
+      return recordings();
+    }
+    case "recording_inspect": {
+      return inspectRecording(decode(toolSchemas.recording_inspect, raw).id);
+    }
+    case "recording_frame": {
+      const value = decode(toolSchemas.recording_frame, raw);
+      return recordingFrame(value.id, value.camera, value.time_s);
+    }
+    case "recording_export": {
+      return exportRecording(decode(toolSchemas.recording_export, raw), signal);
     }
     case "recording_start": {
       return startRecording((input as { label: string }).label);

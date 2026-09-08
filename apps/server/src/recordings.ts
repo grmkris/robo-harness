@@ -5,6 +5,7 @@ import {
   appendFile,
   statfs,
   readFile,
+  rename,
 } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -28,6 +29,20 @@ export let active: Recording | null = null;
 let writing = false;
 let skipped = 0;
 let stopping = false;
+let stopPending: Promise<Recording> | null = null;
+let eventTail = Promise.resolve();
+let pendingEvents = 0;
+let bootId = "";
+const markIncomplete = (record: Recording, message: string) => {
+  if (record.error) return;
+  record.state = "incomplete";
+  record.error = message;
+  db.query("UPDATE recordings SET state='incomplete',error=? WHERE id=?").run(
+    message,
+    record.id
+  );
+  emit("recording.error", { id: record.id, message });
+};
 const known = new Set<string>();
 export function noteMissedSample() {
   if (active?.state === "recording") {
@@ -68,7 +83,10 @@ export async function startRecording(label: string) {
       `${path}/manifest.json`,
       JSON.stringify(
         {
-          version: 1,
+          version: 2,
+          time_axis: "observation.monotonic_s",
+          action_semantics:
+            "sampled commanded joint positions; not measured applied motor actions",
           id,
           label,
           created,
@@ -86,6 +104,9 @@ export async function startRecording(label: string) {
         2
       )
     );
+    bootId = obs.boot_id;
+    eventTail = Promise.resolve();
+    pendingEvents = 0;
     active.state = "recording";
     db.query(
       "INSERT INTO recordings(id,label,state,path,created) VALUES(?,?,?,?,?)"
@@ -112,15 +133,23 @@ export async function recordSample() {
   const record = active;
   try {
     const obs = freshObservation();
+    const currentFrames = frames();
+    const sampledAt = Date.now();
+    const sampledClock = { ...clock };
+    if (obs.boot_id !== bootId)
+      throw new Error("Recording stopped: motor service restarted");
     const stat = await statfs(record.path);
     if (stat.bavail * stat.bsize < 512 * 1024 * 1024) {
       throw new Error("Recording stopped: storage reserve reached");
     }
     const images: Record<string, unknown> = {};
-    const currentFrames = frames();
     for (const name of ["workspace", "wrist"]) {
       const frame = currentFrames[name];
-      if (!frame || frame.age_ms > 500) {
+      if (
+        !frame ||
+        frame.age_ms > 500 ||
+        frame.clock_domain !== obs.clock_domain
+      ) {
         throw new Error("Recording stopped: required camera unavailable");
       }
       const filename = `${name}-${frame.id.replaceAll(/[^a-zA-Z0-9-]/g, "_")}.jpg`;
@@ -135,6 +164,7 @@ export async function recordSample() {
         ...frame,
         base64: undefined,
         path: `images/${filename}`,
+        state_skew_ms: (frame.monotonic_s - obs.monotonic_s) * 1000,
       };
     }
     await appendFile(
@@ -143,8 +173,9 @@ export async function recordSample() {
         index: record.frames,
         observation: obs,
         images,
-        clock,
-        sample_time_ms: Date.now(),
+        clock: sampledClock,
+        time_ms: obs.monotonic_s * 1000,
+        sample_time_ms: sampledAt,
       })}\n`
     );
     record.frames++;
@@ -153,40 +184,62 @@ export async function recordSample() {
       record.id
     );
   } catch (error) {
-    record.state = "incomplete";
-    record.error = error instanceof Error ? error.message : "Recording failed";
-    db.query("UPDATE recordings SET state='incomplete',error=? WHERE id=?").run(
-      record.error,
-      record.id
+    markIncomplete(
+      record,
+      error instanceof Error ? error.message : "Recording failed"
     );
-    emit("recording.error", { id: record.id, message: record.error });
   } finally {
     writing = false;
   }
 }
-export async function recordEvent(event: AppEvent) {
-  // Capture the recording before awaiting: stopRecording or a new start may
-  // change `active` while the program file is read, and the event must land in
-  // the recording that was live when it happened.
+export function recordEvent(event: AppEvent): Promise<void> {
   const record = active;
-  if (!record) {
-    return;
+  if (!record || stopping || record.state !== "recording")
+    return Promise.resolve();
+  if (pendingEvents >= 512) {
+    markIncomplete(record, "Recording event queue overflowed");
+    return Promise.resolve();
   }
-  if (
-    event.type === "shell.completed" &&
-    typeof event.data["program_sha256"] === "string"
-  ) {
-    const hash = event.data["program_sha256"];
-    if (/^[a-f0-9]{64}$/.test(hash)) {
-      await writeFile(
-        `${record.path}/programs/${hash}.sh`,
-        await readFile(`${config.dataDir}/programs/${hash}.sh`)
+  pendingEvents += 1;
+  eventTail = eventTail
+    .then(async () => {
+      if (
+        event.type === "shell.completed" &&
+        typeof event.data["program_sha256"] === "string"
+      ) {
+        const hash = event.data["program_sha256"];
+        if (/^[a-f0-9]{64}$/u.test(hash))
+          await writeFile(
+            `${record.path}/programs/${hash}.sh`,
+            await readFile(`${config.dataDir}/programs/${hash}.sh`)
+          );
+      }
+      await appendFile(
+        `${record.path}/events.jsonl`,
+        `${JSON.stringify(event)}\n`
       );
-    }
-  }
-  await appendFile(`${record.path}/events.jsonl`, `${JSON.stringify(event)}\n`);
+    })
+    .catch((error: unknown) => {
+      markIncomplete(
+        record,
+        error instanceof Error ? error.message : "Recording event write failed"
+      );
+    })
+    .finally(() => {
+      pendingEvents -= 1;
+    });
+  return eventTail;
 }
-export async function stopRecording() {
+export function stopRecording(): Promise<Recording> {
+  if (stopPending) return stopPending;
+  if (!active) throw new ApiError("No active recording");
+  stopping = true;
+  stopPending = finalizeRecording().finally(() => {
+    stopPending = null;
+  });
+  return stopPending;
+}
+async function finalizeRecording() {
   if (!active) {
     throw new ApiError("No active recording");
   }
@@ -194,6 +247,7 @@ export async function stopRecording() {
   while (writing) {
     await Bun.sleep(10);
   }
+  await eventTail;
   const record = active;
   const manifest = JSON.parse(
     await readFile(`${record.path}/manifest.json`, "utf-8")
@@ -207,7 +261,7 @@ export async function stopRecording() {
         : "captured";
   record.error ??= skipped ? `${skipped} sample deadlines were missed` : null;
   await writeFile(
-    `${record.path}/manifest.json`,
+    `${record.path}/manifest.json.tmp`,
     JSON.stringify(
       {
         ...manifest,
@@ -220,6 +274,10 @@ export async function stopRecording() {
       null,
       2
     )
+  );
+  await rename(
+    `${record.path}/manifest.json.tmp`,
+    `${record.path}/manifest.json`
   );
   db.query("UPDATE recordings SET state=?,finished=?,error=? WHERE id=?").run(
     record.state,
