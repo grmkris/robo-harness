@@ -63,6 +63,7 @@ export interface ActionRequest {
   input: ActionInput;
   signal: AbortSignal;
   progress: (event: MotionProgress) => void;
+  assertCurrent?: () => void;
 }
 const terminalStatus = (
   operation: Operation | null
@@ -139,6 +140,7 @@ export const createMotionExecutor = (
   let busy = false;
   const execute = async (request: ActionRequest): Promise<ActionResult> => {
     request.signal.throwIfAborted();
+    request.assertCurrent?.();
     const saved = ledger.get(request.id);
     if (saved) {
       if (JSON.stringify(saved.input) !== JSON.stringify(request.input)) {
@@ -212,6 +214,7 @@ export const createMotionExecutor = (
     });
     const motion = Effect.fn("Motion.execute")(function* motion() {
       const observation = yield* call((signal) => io.observe(signal));
+      request.assertCurrent?.();
       validateTarget(request.input, observation);
       record.bootId = observation.boot_id;
       ledger.save(record);
@@ -234,6 +237,7 @@ export const createMotionExecutor = (
       );
       const owned = lease,
         track = Effect.fn("Motion.track")(function* track() {
+          request.assertCurrent?.();
           submitted = true;
           operation = yield* call((signal) =>
             io.submit(

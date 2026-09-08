@@ -379,3 +379,38 @@ test("leaving the Effect stream early aborts and closes the provider iterator", 
   expect(aborted).toBe(true);
   expect(closed).toBe(true);
 });
+
+test("steering during generation skips the stale tool and replans", async () => {
+  const { model, requests } = scriptedModel([]);
+  let revision = 0;
+  const steers: string[] = [];
+  let executions = 0;
+  model.chatStream = async function* chatStream(options) {
+    requests.push(options);
+    if (requests.length === 1) {
+      yield* toolStep("ping", "old").slice(0, 2);
+      revision += 1;
+      steers.push("pick up the white piece");
+      yield* toolStep("ping", "old").slice(2);
+    } else if (requests.length === 2) {
+      yield* toolStep("ping", "new");
+    } else yield* textStep("done");
+  };
+  const events = await drain(
+    base(model, {
+      steerRevision: () => revision,
+      drainSteers: () => steers.splice(0),
+      tools: [
+        ping(async () => {
+          executions += 1;
+          return { ok: true };
+        }),
+      ],
+    })
+  );
+  expect(executions).toBe(1);
+  expect(JSON.stringify(requests[1]?.messages)).toContain(
+    "pick up the white piece"
+  );
+  expect(JSON.stringify(events)).toContain("OPERATOR_STEERED");
+});

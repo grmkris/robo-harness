@@ -50,6 +50,8 @@ export interface ChatLoopOptions {
   readonly history: readonly ModelMessage[];
   /** Steers queued since the last drain, inlined as numbered user messages. */
   readonly drainSteers: () => readonly string[];
+  readonly steerRevision?: () => number;
+  readonly runtimeContext?: () => string;
   /** Camera frames captured since the last drain, as user messages carrying
    *  the image part — injected before the next step so a vision model sees
    *  them (OpenAI-compatible providers reject media in tool results, so the
@@ -178,10 +180,20 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
           opts.onPersist(transcript);
         };
         let allowed = new Set<string>();
+        let plannedRevision = opts.steerRevision?.() ?? 0;
         const guardedTools = opts.tools.map((definition): Tool => ({
           ...definition,
           execute: async (input: unknown, context) => {
             controller.signal.throwIfAborted();
+            if (
+              definition.name !== "stop" &&
+              plannedRevision !== (opts.steerRevision?.() ?? 0)
+            )
+              throw new ToolFailure({
+                code: "OPERATOR_STEERED",
+                detail:
+                  "The operator changed the instruction while this response was being generated. This tool was not executed. Read the new instruction before acting.",
+              });
             if (summaryOnly || !allowed.has(definition.name))
               throw new ToolFailure({
                 code: "TOOL_NOT_AVAILABLE",
@@ -209,6 +221,7 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
                 (summaryOnly ? [] : guardedTools.map((t) => t.name))
             );
             const steers = opts.drainSteers();
+            plannedRevision = opts.steerRevision?.() ?? 0;
             const messages = [
               ...config.messages,
               ...opts.drainImages(),
@@ -222,6 +235,7 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
               providerMessages: withHarnessBar(
                 trim(messages),
                 renderBar(totalSteps, stepCap, completedSteps, steers.length) +
+                  (opts.runtimeContext ? `\n${opts.runtimeContext()}` : "") +
                   (summaryOnly
                     ? "\nTools are disabled. Explain the measured outcome or recurring failure; do not claim an unfinished action succeeded."
                     : "")

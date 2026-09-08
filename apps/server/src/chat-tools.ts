@@ -73,6 +73,7 @@ export const createChatTools = (options: {
   runId: string;
   onImage: (frame: Frame) => void;
   onProgress: (event: MotionProgress) => void;
+  steerRevision?: () => number;
 }) => {
   let step = 0;
   let mutatedStep = -1;
@@ -186,6 +187,7 @@ export const createChatTools = (options: {
         return { available: groups[group], next_step: true };
       }
       if (name === "move_joints" || name === "move_cartesian") {
+        const revision = options.steerRevision?.() ?? 0;
         const actionInput =
           name === "move_joints"
             ? decode(schemas.move_joints, input)
@@ -198,6 +200,14 @@ export const createChatTools = (options: {
           input: actionInput,
           signal,
           progress: options.onProgress,
+          assertCurrent: () => {
+            if (revision !== (options.steerRevision?.() ?? 0))
+              throw new ToolFailure({
+                code: "OPERATOR_STEERED",
+                detail:
+                  "The operator changed the instruction before motion submission. Replan from the new instruction.",
+              });
+          },
         });
         if (result.status === "unknown" || result.status === "cancelled")
           motionDisabled = true;

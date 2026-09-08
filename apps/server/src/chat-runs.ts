@@ -7,13 +7,14 @@ import { createChatTools } from "./chat-tools";
 import { agentControlSignal } from "./control-lifecycle";
 import { runChatLoop } from "./loop";
 import { resolveModel } from "./providers";
-import { release, ApiError } from "./robot";
+import { release, ApiError, current } from "./robot";
 import { db, emit } from "./store";
 import { describeToolError } from "./tool-errors";
 
 interface ChatSession {
   abort: AbortController;
   inbox: string[];
+  revision: number;
   done: Promise<null>;
 }
 const sessions = new Map<string, ChatSession>();
@@ -26,7 +27,10 @@ Inspect camera freshness and use capture before visually guided motion. Estimate
 Keep tasks incremental. Explain observations, actions, and failures briefly. Report the measured outcome when done. Use stop to cancel motion.
 Use discover_tools to enable recording, perception, development, or commissioned Cartesian tools for the task. You may write and run programs in the development workspace. Pi hardware deployment requires operator review.
 Perception incurs the preapproved budget. Do not provision compute or claim success without evidence.
-The mock backend has synthetic cameras and is not a physics or grasp simulator.`;
+Read the reported backend field: so101 is real hardware; only mock has synthetic cameras. Never infer the backend from unchanged forward kinematics. Gripper opening does not change the arm end-effector position in this kinematic model.
+New operator steering replaces a conflicting earlier instruction. Do not continue its old motion plan.
+Image recognition and segmentation do not establish metric depth or a calibrated grasp target. If grasp geometry or Cartesian commissioning is unavailable, explain the missing capability instead of inventing a joint-space pickup plan. Bounded manual joint nudges remain available.
+Completion tolerances are 0.8 degrees for arm joints and 2 percentage points for the gripper. A nonzero residual inside tolerance is expected; report the actual residual without declaring a failure solely because it is nonzero.`;
 
 export function running() {
   return [...sessions.keys()];
@@ -54,6 +58,7 @@ export function steer(id: string, text: string) {
     throw new ApiError("Conversation is not running");
   }
   session.inbox.push(text);
+  session.revision += 1;
   emit("chat.steer", { session_id: id, text });
 }
 function safe(value: unknown): unknown {
@@ -111,6 +116,7 @@ export async function startChat(
   const state: ChatSession = {
     abort: new AbortController(),
     inbox: [],
+    revision: 0,
     done: settled.promise,
   };
   sessions.set(sessionId, state);
@@ -163,6 +169,7 @@ export async function startChat(
         signal,
         runId,
         vision: resolved.info.vision,
+        steerRevision: () => state.revision,
         onImage: (frame) => pendingImages.push(frame),
         onProgress: (event) => {
           if (event.result?.status === "completed") completedActions += 1;
@@ -189,6 +196,9 @@ export async function startChat(
         abortSignal: signal,
         history: opening,
         drainSteers: () => state.inbox.splice(0),
+        steerRevision: () => state.revision,
+        runtimeContext: () =>
+          `Reported backend: ${current?.backend ?? "unavailable"}. Cartesian commissioned: ${current?.cartesian === true}. Gripper opening is excluded from arm FK.`,
         drainImages: () => {
           const frames = pendingImages.splice(0);
           return resolved.info.vision ? frames.map(frameMessage) : [];

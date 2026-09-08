@@ -345,3 +345,24 @@ test("a journaled pending action is not replayed by a restarted executor", async
   expect(r.state.acquires).toBe(0);
   expect(r.state.submits).toBe(0);
 });
+
+test("steering during acquisition releases control without submitting the old move", async () => {
+  const r = rig();
+  let revised = false;
+  const acquire = r.io.acquire;
+  r.io.acquire = async (...args) => {
+    const lease = await acquire(...args);
+    revised = true;
+    return lease;
+  };
+  const result = await r.executor.execute({
+    ...request(),
+    assertCurrent: () => {
+      if (revised) throw new Error("OPERATOR_STEERED: New instruction");
+    },
+  });
+  expect(result.status).toBe("failed");
+  expect(r.state.submits).toBe(0);
+  expect(r.state.owner).toBe("");
+  expect(r.state.cancels).toBe(1);
+});

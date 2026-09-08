@@ -13,6 +13,7 @@ export const FailureCode = Schema.Literals([
   "TOOL_FAILED",
   "TOOL_NOT_AVAILABLE",
   "REPEATED_FAILURE",
+  "OPERATOR_STEERED",
 ]);
 export type FailureCode = typeof FailureCode.Type;
 
