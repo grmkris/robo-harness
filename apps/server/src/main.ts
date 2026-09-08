@@ -1,7 +1,7 @@
 import { resolve, sep } from "node:path";
 
 import { BunRuntime } from "@effect/platform-bun";
-import { TerminalSize } from "@robo/domain";
+import { TerminalSize, type AppEvent } from "@robo/domain";
 import { toolSchemas } from "@robo/protocol";
 import type { ToolName } from "@robo/protocol";
 import { Context, Effect, Layer, Schema } from "effect";
@@ -280,7 +280,7 @@ async function handle(req: Request): Promise<Response | undefined> {
       let cleanup = () => {};
       const stream = new ReadableStream({
         start(controller) {
-          const send = (value: unknown) => {
+          const send = (value: AppEvent) => {
             try {
               if ((controller.desiredSize ?? 0) < -100) {
                 cleanup();
@@ -288,7 +288,9 @@ async function handle(req: Request): Promise<Response | undefined> {
                 return;
               }
               controller.enqueue(
-                new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`)
+                new TextEncoder().encode(
+                  `id: ${value.id}\ndata: ${JSON.stringify(value)}\n\n`
+                )
               );
             } catch {
               cleanup();

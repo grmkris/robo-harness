@@ -1,4 +1,5 @@
-import type { AppEvent } from "@robo/domain";
+import { AppEvent } from "@robo/domain";
+import { Schema } from "effect";
 import { useEffect, useState } from "react";
 
 export function useEvents(logged: boolean | null, session: string | undefined) {
@@ -13,9 +14,15 @@ export function useEvents(logged: boolean | null, session: string | undefined) {
     if (!logged) {
       return;
     }
+    let lastEventId = 0;
     const source = new EventSource("/api/events");
     source.onmessage = (e) => {
-      const event = JSON.parse(e.data) as AppEvent;
+      const decoded = Schema.decodeUnknownOption(
+        Schema.fromJsonString(AppEvent)
+      )(e.data);
+      if (decoded._tag === "None" || decoded.value.id <= lastEventId) return;
+      const event = decoded.value;
+      lastEventId = event.id;
       setEvents((previous) =>
         previous.some((p) => p.id === event.id)
           ? previous

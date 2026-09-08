@@ -125,6 +125,19 @@ await page.waitForFunction(()=>document.querySelector('.terminal-output')?.textC
 if os.environ.get("ROBO_BROWSER_CHAT_ONLY") == "1":
     browser(
         r"""
+await page.addInitScript(()=>{
+ const Native=window.EventSource;
+ window.EventSource=class extends Native {
+  constructor(...args){super(...args);window.__roboTestSource=this;this.addEventListener('message',event=>{this.__lastId=Number(event.lastEventId)||this.__lastId||0;});}
+ };
+});
+await page.reload({waitUntil:'domcontentloaded'});
+await page.getByRole('heading',{name:'The robot workbench.'}).waitFor();
+""",
+        "observe the browser event stream for replay acceptance",
+    )
+    browser(
+        r"""
 await page.getByRole('button',{name:'chat',exact:true}).click();
 await page.getByLabel('Model',{exact:true}).selectOption('alibaba:fixture');
 await page.getByLabel('Model image capability').waitFor();
@@ -152,6 +165,24 @@ await page.setViewportSize({width:1440,height:1100});
 await page.evaluate(()=>window.scrollTo(0,0));
 """,
         "chat layout and stop remain usable on mobile",
+    )
+    browser(
+        r"""
+await page.evaluate(()=>{
+ const source=window.__roboTestSource;
+ if(!source?.__lastId)throw new Error('SSE did not expose a durable event ID');
+ const event={id:source.__lastId+1,time:Date.now(),type:'chat.delta',data:{session_id:sessionStorage.getItem('robo-conversation'),text:'ReplayProbe'}};
+ const send=()=>source.dispatchEvent(new MessageEvent('message',{data:JSON.stringify(event),lastEventId:String(event.id)}));
+ send();send();
+});
+await page.waitForFunction(()=>document.querySelector('.chat-log')?.textContent?.includes('ReplayProbe'));
+if(((await page.locator('.chat-log').innerText()).match(/ReplayProbe/g)||[]).length!==1)throw new Error('Replay duplicated the streaming draft');
+await page.evaluate(()=>{
+ const source=window.__roboTestSource;
+ source.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({id:source.__lastId+1,time:Date.now(),type:'chat.finished',data:{session_id:sessionStorage.getItem('robo-conversation')}})}));
+});
+""",
+        "replayed deltas update the draft exactly once",
     )
     result = subprocess.run(
         ["expect-cli", "screenshot", "--full-page"], capture_output=True, text=True, timeout=60, env=EXPECT_ENV
