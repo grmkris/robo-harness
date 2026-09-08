@@ -10,23 +10,23 @@ const RequestId = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(128)
 );
-const Duration = Schema.Finite.check(
+export const Duration = Schema.Finite.check(
   Schema.isBetween({ minimum: 0.1, maximum: 10 })
-).pipe(Schema.optional, Schema.withDecodingDefault(Effect.succeed(1)));
+).pipe(Schema.withDecodingDefaultKey(Effect.succeed(1)));
 const Angle = Schema.optionalKey(Schema.Finite);
 // Keys come from the domain joint list so a move target cannot drift from it.
-const PartialPose = Schema.Struct(
+export const JointTarget = Schema.Struct(
   Object.fromEntries(joints.map((joint) => [joint, Angle])) as Record<
     Joint,
     typeof Angle
   >
-);
+).check(Schema.isMinProperties(1));
 // A move is joints XOR a Cartesian target. A single object (both keys optional)
 // keeps the JSON Schema a plain object for MCP; the refine enforces exactly one,
 // and strict decoding (onExcessProperty: "error") rejects an injected field.
 const MoveBase = Schema.Struct({
   request_id: RequestId,
-  target: Schema.optionalKey(PartialPose),
+  target: Schema.optionalKey(JointTarget),
   xyz: Schema.optionalKey(
     Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite])
   ),
@@ -47,12 +47,10 @@ export const toolSchemas = {
   capture: Schema.Struct({ camera: Camera }),
   acquire: Schema.Struct({
     mode: Schema.Literals(["agent", "human", "leader"]).pipe(
-      Schema.optional,
-      Schema.withDecodingDefault(Effect.succeed("agent" as const))
+      Schema.withDecodingDefaultKey(Effect.succeed("agent" as const))
     ),
     takeover: Schema.Boolean.pipe(
-      Schema.optional,
-      Schema.withDecodingDefault(Effect.succeed(false))
+      Schema.withDecodingDefaultKey(Effect.succeed(false))
     ),
   }),
   release: Schema.Struct({}),
@@ -64,8 +62,7 @@ export const toolSchemas = {
     camera: Camera,
     kind: Schema.Literals(["segment", "depth"]),
     prompt: Schema.String.check(Schema.isMaxLength(200)).pipe(
-      Schema.optional,
-      Schema.withDecodingDefault(Effect.succeed("object"))
+      Schema.withDecodingDefaultKey(Effect.succeed("object"))
     ),
     frame_id: Schema.optionalKey(Schema.String),
   }),
@@ -79,12 +76,11 @@ export const toolSchemas = {
       Schema.isMaxLength(16_000)
     ),
     host: Schema.Literals(["netcup", "pi"]).pipe(
-      Schema.optional,
-      Schema.withDecodingDefault(Effect.succeed("netcup" as const))
+      Schema.withDecodingDefaultKey(Effect.succeed("netcup" as const))
     ),
     timeout_s: Schema.Finite.check(
       Schema.isBetween({ minimum: 1, maximum: 120 })
-    ).pipe(Schema.optional, Schema.withDecodingDefault(Effect.succeed(30))),
+    ).pipe(Schema.withDecodingDefaultKey(Effect.succeed(30))),
   }),
 } as const;
 export type ToolName = keyof typeof toolSchemas;
@@ -92,11 +88,19 @@ export type ToolName = keyof typeof toolSchemas;
 // The model requires each tool's input to be an object schema. A no-argument
 // tool serialises to an `anyOf`, which some providers (xAI) reject, so it is
 // normalised to an empty object.
-export function toolInputSchema(name: ToolName): Record<string, unknown> {
+export const toolInputSchema = (name: ToolName) => {
   const json = std(toolSchemas[name])["~standard"].jsonSchema.input({
     target: "draft-2020-12",
   }) as Record<string, unknown>;
-  return json["type"] === "object"
-    ? json
-    : { type: "object", properties: {}, additionalProperties: false };
-}
+  if (json["type"] === "object") {
+    return name === "move"
+      ? { ...json, oneOf: [{ required: ["target"] }, { required: ["xyz"] }] }
+      : json;
+  }
+  if (
+    ["observe", "release", "renew", "stop", "recording_stop"].includes(name)
+  ) {
+    return { type: "object", properties: {}, additionalProperties: false };
+  }
+  throw new Error(`Tool ${name} must expose an object schema`);
+};
