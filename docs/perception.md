@@ -34,3 +34,11 @@ For a fixed-camera baseline with measured ground truth, use the [offline tableto
 SAM 3 masks retain source-frame geometry and include pixel area/bounds. Depth previews carry their actual dimensions and a scale back to source pixels; no numeric metric depth is claimed. Hosted model revisions are labeled unpinned. The original private worker and custom endpoint contracts remain available.
 
 The deployed conservative reservation is $0.05 per request. This is a budget reservation ceiling, not a quoted model price. Approve the total cap in Activity before sending any paid request. The provider receives the chosen camera image and prompt; recordings and exports do not require this transfer.
+
+## Camera review and history
+
+Each submitted check saves its exact source image before inference. The camera panel opens manual results on that historical frame, with a separate live inset. Segmentation has colored masks, outlines and opacity controls; relative depth has an overlay toggle and legend. New agent checks appear in the history strip without replacing the operator's selection. Camera-side recording captures both cameras and telemetry, and remains stoppable during inference.
+
+`GET /api/perception` returns 25 newest checks and a `next` cursor; pass `before` for older checks or `recording_id` for recorded-session markers. `GET /api/perception/:id/detail` returns validated metadata and result, and `/source` returns the saved image. The existing `/api/perception/:id` preview remains available. These routes use the existing authentication boundary.
+
+The recording association is fixed from the source capture when a request begins, so a late result remains visible from its original session. Marker times are relative to recording start. Results predating source-image preservation remain standalone previews. An interrupted running check becomes a visible failure after restart; uncertain spend reservations remain retained. Browsing or reopening results never submits inference or modifies raw training images.

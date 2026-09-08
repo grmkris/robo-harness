@@ -1,12 +1,16 @@
 import { RecordingDetail } from "@robo/domain";
 import { Schema } from "effect";
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 import { api } from "../lib/client";
 import type { Recorded, Status } from "../lib/types";
+import { PerceptionHistory } from "./perception-review";
 import { RecordingEditor } from "./recording-editor";
 
 export function RecordingsTab({
+  perceptionRevision,
+  reviewId,
+  onPerception,
   recordName,
   setRecordName,
   recording,
@@ -16,6 +20,9 @@ export function RecordingsTab({
   records,
   onReplay,
 }: {
+  perceptionRevision: number;
+  reviewId: string | null;
+  onPerception: (id: string) => void;
   recordName: string;
   setRecordName: Dispatch<SetStateAction<string>>;
   recording: Status["recording"];
@@ -27,6 +34,21 @@ export function RecordingsTab({
 }) {
   const [selected, setSelected] = useState<RecordingDetail | null>(null);
   const [error, setError] = useState("");
+  useEffect(() => {
+    let current = true;
+    if (reviewId)
+      void api(`recordings/${reviewId}`)
+        .then((raw) => {
+          if (current)
+            setSelected(Schema.decodeUnknownSync(RecordingDetail)(raw));
+        })
+        .catch((error) => {
+          if (current) setError(String(error));
+        });
+    return () => {
+      current = false;
+    };
+  }, [reviewId]);
   return (
     <div className="tab-body">
       <p className="eyebrow">KEEP THE EVIDENCE</p>
@@ -65,6 +87,16 @@ export function RecordingsTab({
           key={selected.id}
           initial={selected}
           onClose={() => setSelected(null)}
+        />
+      ) : null}
+      {selected ? (
+        <PerceptionHistory
+          revision={perceptionRevision}
+          recordingId={selected.id}
+          recordingCreated={
+            records.find((record) => record.id === selected.id)?.created
+          }
+          onSelect={onPerception}
         />
       ) : null}
       <div className="record-list">

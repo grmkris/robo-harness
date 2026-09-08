@@ -6,6 +6,10 @@ import { ChatTab } from "./components/chat-tab";
 import { ControlDeck } from "./components/control-deck";
 import { Login } from "./components/login";
 import { PerceptionBar } from "./components/perception-bar";
+import {
+  PerceptionHistory,
+  PerceptionReview,
+} from "./components/perception-review";
 import { RecordingsTab } from "./components/recordings-tab";
 import { TerminalTab } from "./components/terminal-tab";
 import { TitleRow } from "./components/title-row";
@@ -27,6 +31,9 @@ export function App() {
   );
   const { events, setEvents, draft, setDraft } = useEvents(logged, session);
   const [tab, setTab] = useState("chat");
+  const [perceptionId, setPerceptionId] = useState<string | null>(null);
+  const [cameraRecordingPending, setCameraRecordingPending] = useState(false);
+  const [savedRecording, setSavedRecording] = useState<string | null>(null);
   const [replay, setReplay] = useState<string | null>(null);
   const [fallback, setFallback] = useState(false);
   const [recordName, setRecordName] = useState(
@@ -196,6 +203,41 @@ export function App() {
       <div className="workbench">
         <section className="visual panel">
           <Viewer
+            review={
+              perceptionId ? (
+                <PerceptionReview
+                  id={perceptionId}
+                  revision={
+                    events.findLast((e) => e.type.startsWith("perception."))
+                      ?.id ?? 0
+                  }
+                  viewTick={viewTick}
+                  onClose={() => setPerceptionId(null)}
+                />
+              ) : null
+            }
+            recording={status.recording}
+            recordingPending={cameraRecordingPending}
+            canRecord={fresh}
+            onRecord={async () => {
+              setCameraRecordingPending(true);
+              const stopping = Boolean(status.recording);
+              const result = await run(
+                stopping ? "recording_stop" : "recording_start",
+                stopping
+                  ? {}
+                  : { label: `Exploration ${new Date().toLocaleString()}` }
+              );
+              if (
+                result &&
+                stopping &&
+                typeof result === "object" &&
+                "id" in result &&
+                typeof result["id"] === "string"
+              )
+                setSavedRecording(result["id"]);
+              setCameraRecordingPending(false);
+            }}
             replay={replay}
             fallback={fallback}
             viewerKey={viewerKey}
@@ -211,6 +253,15 @@ export function App() {
             onToggleFallback={() => setFallback((v) => !v)}
             onReload={() => setViewerKey((v) => v + 1)}
           />
+          {savedRecording ? (
+            <button
+              type="button"
+              className="artifact-link"
+              onClick={() => setTab("recordings")}
+            >
+              Saved · Review & export
+            </button>
+          ) : null}
           <PerceptionBar
             settings={status.perception}
             camera={camera}
@@ -222,6 +273,13 @@ export function App() {
             fresh={fresh}
             run={run}
             lastPerception={lastPerception}
+            onResult={setPerceptionId}
+          />
+          <PerceptionHistory
+            revision={
+              events.findLast((e) => e.type.startsWith("perception."))?.id ?? 0
+            }
+            onSelect={setPerceptionId}
           />
         </section>
         <aside className="side panel">
@@ -273,6 +331,12 @@ export function App() {
           ) : null}
           {tab === "recordings" ? (
             <RecordingsTab
+              reviewId={savedRecording}
+              onPerception={setPerceptionId}
+              perceptionRevision={
+                events.findLast((e) => e.type.startsWith("perception."))?.id ??
+                0
+              }
               recordName={recordName}
               setRecordName={setRecordName}
               recording={status.recording}

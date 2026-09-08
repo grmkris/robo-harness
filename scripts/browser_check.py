@@ -58,6 +58,53 @@ browser(
     + "if(await page.getByLabel('Operator token').count())throw new Error('Unexpected login prompt');",
     "workbench opens without a token",
 )
+if os.environ.get("ROBO_BROWSER_PERCEPTION_ONLY") == "1":
+    browser(
+        r"""
+await page.getByRole('button',{name:'⏺ Record',exact:true}).click();
+await page.getByRole('button',{name:/REC .*Stop recording/}).waitFor();
+await page.getByLabel('Segmentation prompt').fill('white piece');
+await page.getByRole('button',{name:'Segment',exact:true}).click();
+await page.getByRole('region',{name:'Perception review',exact:true}).waitFor();
+await page.getByAltText('Exact analyzed camera frame').waitFor();
+await page.waitForFunction(()=>{const c=document.querySelector('canvas[aria-label="Segmentation mask overlay"]');return c&&c.getContext('2d').getImageData(Math.floor(c.width*.4),Math.floor(c.height*.4),1,1).data[3]>0;});
+const source=await page.getByAltText('Exact analyzed camera frame').getAttribute('src');
+await page.getByLabel('Overlay',{exact:true}).uncheck();
+if(await page.getByLabel('Segmentation mask overlay').count())throw new Error('Overlay toggle failed');
+await page.getByLabel('Overlay',{exact:true}).check();
+if(source!==await page.getByAltText('Exact analyzed camera frame').getAttribute('src'))throw new Error('Analyzed source changed');
+await page.getByRole('button',{name:/REC .*Stop recording/}).click();
+await page.getByRole('button',{name:'Saved · Review & export',exact:true}).click();
+await page.getByRole('region',{name:'Recording editor',exact:true}).waitFor();
+await page.getByRole('region',{name:'Recording perception markers',exact:true}).getByRole('button',{name:'Review white piece completed',exact:true}).waitFor();
+""",
+        "camera recording, exact-frame mask overlay, toggles and recording markers",
+    )
+    browser(
+        r"""
+await page.reload({waitUntil:'domcontentloaded'});
+await page.getByRole('region',{name:'Perception history',exact:true}).getByRole('button',{name:'Review white piece completed',exact:true}).click();
+await page.getByAltText('Exact analyzed camera frame').waitFor();
+const selected=await page.getByAltText('Exact analyzed camera frame').getAttribute('src');
+await page.evaluate(async()=>{await fetch('/api/tool/perceive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({camera:'wrist',kind:'depth',prompt:'agent depth'})});});
+await page.getByRole('button',{name:'Review agent depth completed',exact:true}).waitFor();
+if(selected!==await page.getByAltText('Exact analyzed camera frame').getAttribute('src'))throw new Error('Agent completion interrupted review');
+await page.getByRole('button',{name:'Review agent depth completed',exact:true}).click();
+await page.getByAltText('Relative depth overlay').waitFor();
+await page.getByText('Low → high · no metric distance',{exact:false}).waitFor();
+await page.setViewportSize({width:390,height:844});
+if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2))throw new Error('Perception review overflows mobile');
+await page.getByRole('button',{name:'STOP / HOLD'}).scrollIntoViewIfNeeded();
+await page.setViewportSize({width:1440,height:1100});
+await page.getByRole('button',{name:'Return to live',exact:true}).click();
+""",
+        "persistent history, agent completion isolation, wrist depth and mobile layout",
+    )
+    result = subprocess.run(["expect-cli", "screenshot", "--full-page"], capture_output=True, text=True, timeout=60, env=EXPECT_ENV)
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    print(result.stdout.strip())
+    sys.exit(0)
 if os.environ.get("ROBO_BROWSER_RECORDING_ONLY") == "1":
     browser(
         r"""

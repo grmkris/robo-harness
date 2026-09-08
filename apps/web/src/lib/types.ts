@@ -15,6 +15,7 @@ export interface Status {
     created: number;
   }>;
   recording: {
+    created: number;
     id: string;
     label: string;
     frames: number;

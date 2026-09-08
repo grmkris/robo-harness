@@ -39,3 +39,5 @@ TanStack owns the model/tool cycle behind a server-only domain event adapter. Ef
 ## Recording derivatives and perception
 
 Catalog adapters connect SAM 3 masks and Depth Anything V2 relative-depth previews through a scoped fal queue request. Recording v2 timestamps observations before disk I/O, drains a bounded event writer, and preserves originals when creating MP4 or native LeRobot interval exports. Offline export process groups are owned by Effect and receive no provider credentials. See [decision 0008](decisions/0008-perception-and-recording.md) and [recording workflow](recordings.md).
+
+Perception history stores source-frame images beside results and keeps request metadata in the existing perception row's source JSON. Cursor-paginated summaries and detailed results share Effect Schema contracts with the workbench. A check's recording association is fixed at capture, independent of completion time. UI overlays always use that saved frame; the live inset is separate.

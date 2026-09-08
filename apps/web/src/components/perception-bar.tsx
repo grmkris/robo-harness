@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Status } from "../lib/types";
 
 export function PerceptionBar({
+  onResult,
   settings,
   camera,
   setCamera,
@@ -15,6 +16,7 @@ export function PerceptionBar({
   run,
   lastPerception,
 }: {
+  onResult: (id: string) => void;
   settings: Status["perception"];
   camera: string;
   setCamera: Dispatch<SetStateAction<string>>;
@@ -56,11 +58,18 @@ export function PerceptionBar({
             }
             onClick={async () => {
               setPerceptionBusy(true);
-              await run("perceive", {
+              const result = await run("perceive", {
                 camera,
                 kind,
                 prompt: perceptionPrompt,
               });
+              if (
+                result &&
+                typeof result === "object" &&
+                "id" in result &&
+                typeof result.id === "string"
+              )
+                onResult(result.id);
               setPerceptionBusy(false);
             }}
           >
