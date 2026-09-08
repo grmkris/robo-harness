@@ -83,7 +83,13 @@ export interface Harness {
   readonly close: () => Promise<void>;
 }
 
+export interface FixtureStep {
+  text?: string;
+  calls?: { name: string; input: unknown; id?: string }[];
+  delayMs?: number;
+}
 export interface HarnessOptions {
+  readonly modelSteps?: readonly FixtureStep[];
   /** "token" (default) or "tailnet". */
   readonly accessMode?: "token" | "tailnet";
   /** Start the Python mock I/O service (default true). */
@@ -105,7 +111,9 @@ export async function startHarness(
   const directory = await mkdtemp(join(tmpdir(), "robo-harness-"));
   const requests: Record<string, unknown>[] = [];
 
-  const fixture = withFixture ? startFixture(requests) : undefined;
+  const fixture = withFixture
+    ? startFixture(requests, options.modelSteps)
+    : undefined;
 
   let io: ReturnType<typeof Bun.spawn> | undefined;
   let ioUrl = options.ioUrl ?? "http://127.0.0.1:59999";
@@ -224,7 +232,8 @@ export async function startHarness(
 }
 
 function startFixture(
-  requests: Record<string, unknown>[]
+  requests: Record<string, unknown>[],
+  modelSteps?: readonly FixtureStep[]
 ): ReturnType<typeof Bun.serve> {
   return Bun.serve({
     hostname: "127.0.0.1",
@@ -257,23 +266,43 @@ function startFixture(
         messages: { role: string; content: unknown }[];
       };
       requests.push(body);
-      const done = body.messages.some((m) => m.role === "tool");
-      const capture = JSON.stringify(body.messages).includes("camera");
-      const delta = done
-        ? { content: "Verified mock observation. No movement executed." }
-        : {
-            tool_calls: [
-              {
-                index: 0,
-                id: "fixture-call",
+      const scripted = modelSteps?.[requests.length - 1];
+      if (scripted?.delayMs) await Bun.sleep(scripted.delayMs);
+      const done = modelSteps
+        ? !scripted?.calls?.length
+        : body.messages.some((m) => m.role === "tool");
+      const capture = body.messages.some(
+        (m) => m.role === "user" && JSON.stringify(m.content).includes("camera")
+      );
+      const delta = modelSteps
+        ? done
+          ? { content: scripted?.text ?? "Reported the measured outcome." }
+          : {
+              tool_calls: scripted?.calls?.map((call, index) => ({
+                index,
+                id: call.id ?? `fixture-${requests.length}-${index}`,
                 type: "function",
                 function: {
-                  name: capture ? "capture" : "observe",
-                  arguments: capture ? '{"camera":"workspace"}' : "{}",
+                  name: call.name,
+                  arguments: JSON.stringify(call.input),
                 },
-              },
-            ],
-          };
+              })),
+            }
+        : done
+          ? { content: "Verified mock observation. No movement executed." }
+          : {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "fixture-call",
+                  type: "function",
+                  function: {
+                    name: capture ? "capture" : "observe",
+                    arguments: capture ? '{"camera":"workspace"}' : "{}",
+                  },
+                },
+              ],
+            };
       const chunks = [
         {
           id: "fixture",

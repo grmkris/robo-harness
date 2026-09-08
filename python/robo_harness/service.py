@@ -30,16 +30,24 @@ CAMERA_STALE_MS = 500
 
 
 class Acquire(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     owner: str = Field(min_length=1, max_length=128)
     mode: str = "agent"
     takeover: bool = False
+    expected_boot_id: str | None = None
+    expected_control_epoch: int | None = Field(default=None, ge=0)
 
 
 class Lease(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     owner: str
     lease_id: str
+
+
+class CancelOwner(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    owner: str = Field(min_length=1, max_length=128)
+    boot_id: str
 
 
 class Move(Lease):
@@ -141,7 +149,7 @@ def create_app(profile: dict[str, Any], token: str, run_loop: bool = True) -> Fa
 
     @app.post("/control/acquire")
     def acquire(body: Acquire):
-        lease = engine.acquire(body.owner, body.mode, body.takeover)
+        lease = engine.acquire(**body.model_dump())
         if body.mode == "leader":
             try:
                 if profile["backend"] == "mock":
@@ -170,6 +178,10 @@ def create_app(profile: dict[str, Any], token: str, run_loop: bool = True) -> Fa
         engine.release(body.lease_id, body.owner)
         return {"released": True}
 
+    @app.post("/control/cancel-owner")
+    def cancel_owner(body: CancelOwner):
+        return engine.cancel_owner(body.owner, body.boot_id)
+
     @app.post("/control/stop")
     def halt():
         return engine.stop()
@@ -177,6 +189,10 @@ def create_app(profile: dict[str, Any], token: str, run_loop: bool = True) -> Fa
     @app.post("/operations")
     def move(body: Move):
         return engine.submit(**body.model_dump())
+
+    @app.get("/operations/request")
+    def find_operation(owner: str, request_id: str, boot_id: str):
+        return engine.find_operation(owner, request_id, boot_id)
 
     @app.get("/operations/{operation_id}")
     def operation(operation_id: str):

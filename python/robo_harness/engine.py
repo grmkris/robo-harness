@@ -41,6 +41,7 @@ class Engine:
         self.driver, self.profile, self.kin, self.clock = driver, profile, kinematics, clock
         self.lock = threading.RLock()
         self.boot_id = str(uuid.uuid4())
+        self.control_epoch = 0
         self.measured: dict[str, float] = driver.read()
         self.commanded: dict[str, float] = self.measured.copy()
         self.lease: dict[str, Any] | None = None
@@ -63,6 +64,7 @@ class Engine:
             frames = self.kin.frames(self.measured)
             return {
                 "boot_id": self.boot_id,
+                "control_epoch": self.control_epoch,
                 "seq": self.seq,
                 "monotonic_s": self.last_observed,
                 "wall_time_ms": self.last_wall_ms,
@@ -92,10 +94,22 @@ class Engine:
                 or self.profile.get("cartesian_reviewed", False),
             }
 
-    def acquire(self, owner: str, mode: str = "agent", takeover: bool = False) -> dict[str, Any]:
+    def acquire(
+        self,
+        owner: str,
+        mode: str = "agent",
+        takeover: bool = False,
+        *,
+        expected_boot_id: str | None = None,
+        expected_control_epoch: int | None = None,
+    ) -> dict[str, Any]:
         if mode not in ("human", "agent", "leader"):
             raise ControlError("Unknown controller mode", 400)
         with self.lock:
+            if expected_boot_id is not None and expected_boot_id != self.boot_id:
+                raise ControlError("Robot restarted; stale acquisition refused")
+            if expected_control_epoch is not None and expected_control_epoch != self.control_epoch:
+                raise ControlError("Control was revoked; stale acquisition refused")
             if self.fault:
                 raise ControlError("Hardware fault is latched; inspect before restarting the service")
             if mode == "agent" and not self.observation_guard():
@@ -105,6 +119,8 @@ class Engine:
                     return self._lease_reply()
                 if not takeover:
                     raise ControlError("Robot already has a controller")
+            if mode in ("human", "leader") or takeover:
+                self.control_epoch += 1
             self._stop("Controller changed")
             self.lease = {"id": str(uuid.uuid4()), "owner": owner, "mode": mode, "expires": self.clock() + 3}
             return self._lease_reply()
@@ -143,13 +159,32 @@ class Engine:
 
     def stop(self, reason: str = "Stopped by operator") -> dict[str, Any]:
         with self.lock:
+            self.control_epoch += 1
             self._stop(reason)
             self.lease = None
             return self.observe()
 
+    def cancel_owner(self, owner: str, boot_id: str) -> dict[str, Any]:
+        with self.lock:
+            if boot_id != self.boot_id:
+                raise ControlError("Robot restarted; cancellation belongs to another boot")
+            # Invalidate acquisitions sent before cancellation even if their HTTP
+            # request has not reached this lock. Another owner's hold is untouched.
+            self.control_epoch += 1
+            if self.lease and self.lease["owner"] == owner:
+                self._stop("Agent action cancelled")
+                self.lease = None
+            return {"cancelled": True}
+
     def _stop(self, reason: str) -> None:
         if self.operation and self.operation["status"] in ("accepted", "running"):
-            self.operation.update(status="cancelled", reason=reason, finished_ms=time.time() * 1000)
+            self.operation.update(
+                status="cancelled",
+                reason=reason,
+                finished_ms=time.time() * 1000,
+                measured=copy.deepcopy(self.measured),
+                residual={j: abs(self.measured[j] - self.operation["target"][j]) for j in JOINTS},
+            )
         # Hold the last commanded position, not the sagged measured position.
         self.trajectory = []
         if self.leader:
@@ -258,6 +293,7 @@ class Engine:
                 "_started": self.clock(),
                 "_signature": signature,
                 "residual": None,
+                "measured": copy.deepcopy(self.measured),
             }
             self.operations[key] = self.operation
             self.trajectory = samples
@@ -269,6 +305,13 @@ class Engine:
                 if op["id"] == operation_id:
                     return self._public(op)
         raise ControlError("Operation not found in this service boot", 404)
+
+    def find_operation(self, owner: str, request_id: str, boot_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            if boot_id != self.boot_id:
+                raise ControlError("Robot restarted; operation outcome is unknown")
+            op = self.operations.get((owner, request_id))
+            return self._public(op) if op else None
 
     @staticmethod
     def _public(op: dict[str, Any]) -> dict[str, Any]:
@@ -338,6 +381,7 @@ class Engine:
                     op["status"] = "running"
                     residual = {j: abs(self.measured[j] - op["target"][j]) for j in JOINTS}
                     op["residual"] = residual
+                    op["measured"] = copy.deepcopy(self.measured)
                     if now >= op["_started"] + op["duration_s"] and all(
                         v <= (2 if j == "gripper" else 0.8) for j, v in residual.items()
                     ):
@@ -353,7 +397,13 @@ class Engine:
             except Exception as e:
                 self.fault = f"{type(e).__name__}: {e}"
                 if self.operation and self.operation["status"] in ("accepted", "running"):
-                    self.operation.update(status="failed", reason=self.fault)
+                    self.operation.update(
+                        status="failed",
+                        reason=self.fault,
+                        finished_ms=time.time() * 1000,
+                        measured=copy.deepcopy(self.measured),
+                        residual={j: abs(self.measured[j] - self.operation["target"][j]) for j in JOINTS},
+                    )
                 self._stop("Hardware fault")
                 self.lease = None
                 # A failed bus cannot promise hold. Fault remains latched.

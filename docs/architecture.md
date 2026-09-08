@@ -23,3 +23,7 @@ Tailscale access is the default; human trust comes from the peer address, not a 
 The TypeScript side is converging on the house style used across `~/code`: Effect 4 for lifecycle, configuration, typed errors and boundaries, Effect Schema in place of Zod, and an `apps/*` + `packages/*` workspace layout with an enforced import graph. Decisions are recorded in `docs/decisions/`.
 
 Observation and frame freshness includes a conservative full HTTP round-trip bound plus elapsed local monotonic time. A camera request never blocks the observation sampler or the other camera; each camera has at most one request in flight. Recordings and telemetry read aged frame snapshots, and a robot boot change discards frames from another clock domain.
+
+## Chat actions
+
+Chat uses a small capability-gated facade over the low-level protocol. A coordinator action executor owns acquisition, bounded renewal, measured polling, cancellation and cleanup inside one Effect scope. Python boot/epoch guards reject stale acquisitions after stop or takeover, and an additive SQLite ledger prevents automatic replay after uncertain submissions or restart. The motor lease remains three seconds; manual controls and program clients retain the low-level API. See [decision 0004](decisions/0004-supervised-chat-motion.md).

@@ -32,7 +32,7 @@ For access from another tailnet machine, build first and start with `ROBO_HOST=1
 1. Take manual control. Jog joints/gripper or Cartesian XYZ in the base frame.
 2. Stop/hold cancels movement and revokes control. Release returns to holding.
 3. Leader teleoperation becomes available only on commissioned real hardware.
-4. Configure a model provider in `.env` to chat. The agent uses the same robot API and cannot take over human control.
+4. Configure a model provider in `.env` to chat. Chat supervises each bounded move through acquisition, renewal, measured completion and release; it cannot take over human control. The model picker shows effective camera-image support. Optional tools are enabled through discovery; see [the chat action decision](docs/decisions/0004-supervised-chat-motion.md) for configuration and recovery behavior.
 5. Use Recordings to capture observations, actions, code references, and Rerun replay. Replay is historical; manual controls always refer to live state.
 6. Configure a perception worker and a conservative per-request charge, then approve an aggregate spending cap in Activity. Segmentation/depth stay off until both are configured.
 

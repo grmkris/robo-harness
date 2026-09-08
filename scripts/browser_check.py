@@ -5,10 +5,11 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = "http://127.0.0.1:5178"
+BASE = os.environ.get("ROBO_BROWSER_URL", "http://127.0.0.1:5178")
 EXPECT_ENV = {
     **os.environ,
     "NODE_OPTIONS": (
@@ -37,13 +38,18 @@ def browser(code, label):
     except subprocess.TimeoutExpired:
         raise RuntimeError(label + ": local browser runner timed out") from None
     if result.returncode or "Error:" in result.stdout:
-        raise RuntimeError(label + ": " + result.stdout[:1000] + result.stderr[:500])
+        raise RuntimeError(label + ": " + result.stdout[-1500:] + result.stderr[-1500:])
     print("PASS", label, flush=True)
 
 
 state = json.load(urllib.request.urlopen(BASE + "/api/status"))
 assert state["observation"]["backend"] == "mock", "Browser test must never operate real motors"
 assert state["access_mode"] == "tailnet", "Browser test expects tokenless Tailscale access"
+opened = subprocess.run(
+    ["expect-cli", "open", BASE], capture_output=True, text=True, timeout=60, env=EXPECT_ENV
+)
+if opened.returncode:
+    raise RuntimeError("Opening local browser: " + opened.stderr[-1500:])
 browser(
     "await page.context().clearCookies(); await page.goto("
     + json.dumps(BASE)
@@ -51,6 +57,44 @@ browser(
     + "if(await page.getByLabel('Operator token').count())throw new Error('Unexpected login prompt');",
     "workbench opens without a token",
 )
+if os.environ.get("ROBO_BROWSER_CHAT_ONLY") == "1":
+    browser(
+        r"""
+await page.getByRole('button',{name:'chat',exact:true}).click();
+await page.getByLabel('Model',{exact:true}).selectOption('alibaba:fixture');
+await page.getByLabel('Model image capability').waitFor();
+if(!(await page.getByLabel('Model image capability').innerText()).includes('Camera images enabled'))throw new Error('Vision capability missing');
+await page.getByLabel('Model',{exact:true}).selectOption('alibaba:qwen3-coder-next');
+if(!(await page.getByLabel('Model image capability').innerText()).includes('Text only'))throw new Error('Selected model capability did not change');
+await page.getByLabel('Model',{exact:true}).selectOption('alibaba:fixture');
+await page.getByLabel('Message the robot agent').fill('Move the mock gripper a little and report the measured result.');
+await page.getByRole('button',{name:'Send ↗',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('.chat-log')?.textContent?.includes('Invalid tool arguments'),null,{timeout:15000});
+await page.waitForFunction(()=>document.querySelector('.motion-progress')?.textContent?.includes('measured completion'),null,{timeout:15000});
+await page.waitForFunction(()=>document.querySelector('.chat-log')?.textContent?.includes('Fixture move completed'),null,{timeout:15000});
+if((await page.locator('.chat-log').innerText()).includes('Tool failed'))throw new Error('Generic error hid useful validation details');
+if(await page.locator('.motion-progress').count()!==1)throw new Error('Progress was not coalesced by action');
+await page.waitForFunction(async()=>{const s=await(await fetch('/api/status')).json();return s.observation.operator===null&&s.observation.operation.status==='completed';},null,{timeout:10000});
+""",
+        "chat model capabilities, validation recovery, and measured motion",
+    )
+    browser(
+        r"""
+await page.setViewportSize({width:390,height:844});
+await page.getByRole('button',{name:'STOP / HOLD'}).scrollIntoViewIfNeeded();
+if(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+2))throw new Error('Mobile page overflows');
+await page.setViewportSize({width:1440,height:1100});
+await page.evaluate(()=>window.scrollTo(0,0));
+""",
+        "chat layout and stop remain usable on mobile",
+    )
+    result = subprocess.run(
+        ["expect-cli", "screenshot", "--full-page"], capture_output=True, text=True, timeout=60, env=EXPECT_ENV
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    print(result.stdout.strip())
+    sys.exit(0)
 browser(
     r"""
 await page.getByRole('button',{name:'STOP / HOLD'}).click({noWaitAfter:true,timeout:10000});

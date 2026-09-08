@@ -118,13 +118,6 @@ export const trailingRepeat = (
   };
 };
 
-/** StopCondition for streamText: halt a model that repeats itself. */
-export const noDoomLoop = ({
-  steps,
-}: {
-  steps: readonly StepLike[];
-}): boolean => isDoomLoop(steps);
-
 // Two shapes the pair above cannot see. `isDoomLoop` needs five IDENTICAL
 // steps in a row, and `trailingRepeat` needs identical arguments, so a model
 // that alternates between two states, or that keeps varying its arguments and
@@ -163,13 +156,6 @@ export const isCycleLoop = (steps: readonly StepLike[]): boolean => {
     [...seen.values()].every((count) => count > 1)
   );
 };
-
-/** StopCondition for streamText: halt a model going in circles. */
-export const noCycleLoop = ({
-  steps,
-}: {
-  steps: readonly StepLike[];
-}): boolean => isCycleLoop(steps);
 
 export interface ResultChurn {
   readonly count: number;
@@ -217,4 +203,33 @@ export const resultChurn = (steps: readonly StepLike[]): ResultChurn | null => {
         distinctCalls: calls.size,
         output: last.toolResults?.[0]?.output,
       };
+};
+
+/** Failed actions count independently of changing tool/request IDs. Read-only
+ * observations cannot erase a run of unsuccessful attempts to act. */
+export const failedActionSteps = (
+  steps: readonly {
+    content?: readonly { type: string; error?: unknown }[];
+    toolResults?: readonly { toolName: string; output: unknown }[];
+  }[]
+): number => {
+  let failures = 0;
+  for (const step of steps) {
+    const badInput =
+      step.content?.some((part) => part.type === "tool-error") ?? false;
+    const outcomes = (step.toolResults ?? []).map(({ output }) =>
+      typeof output === "object" && output !== null && "status" in output
+        ? output.status
+        : null
+    );
+    if (outcomes.includes("completed")) failures = 0;
+    if (
+      badInput ||
+      outcomes.some((status) =>
+        ["failed", "cancelled", "unknown"].includes(String(status))
+      )
+    )
+      failures += 1;
+  }
+  return failures;
 };

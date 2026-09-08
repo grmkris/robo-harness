@@ -99,8 +99,8 @@ test("a model that repeats the identical tool call is stopped by the doom-loop g
     Array.from({ length: 20 }, (_, i) => toolStep("ping", `c${String(i)}`))
   );
   const { types } = await drain(base(model));
-  // Five identical call+result steps trip the guard; the sixth call is never made.
-  expect(model.doStreamCalls.length).toBe(DOOM_LOOP_STOP);
+  // Five repeated executions are followed by one summary-only model call.
+  expect(model.doStreamCalls.length).toBe(DOOM_LOOP_STOP + 1);
   expect(types.filter((t) => t === "tool-result").length).toBe(DOOM_LOOP_STOP);
 });
 
@@ -156,4 +156,71 @@ test("a steer that arrives after a text-only step starts another round that sees
   // The steer reached the second call's prompt.
   const second = JSON.stringify(model.doStreamCalls[1]?.prompt);
   expect(second).toContain("keep going");
+});
+
+test("three failures with changing inputs force a summary and cannot execute another action", async () => {
+  const steps = Array.from({ length: 6 }, (_, index) => [
+    { type: "stream-start", warnings: [] } as Chunk,
+    {
+      type: "tool-call",
+      toolCallId: `bad-${index}`,
+      toolName: "ping",
+      input: JSON.stringify({ attempt: index }),
+    } as Chunk,
+    {
+      type: "finish",
+      usage: nullUsage,
+      finishReason: { unified: "tool-calls", raw: "tool_use" },
+    } as Chunk,
+  ]);
+  const model = scriptedModel(steps);
+  let executions = 0;
+  const tools = {
+    ping: tool({
+      inputSchema: jsonSchema({ type: "object" }),
+      execute: async (): Promise<string> => {
+        executions += 1;
+        throw new Error("Repeated failure");
+      },
+    }),
+  };
+  await drain(base(model, { tools }));
+  expect(executions).toBe(3);
+  expect(model.doStreamCalls).toHaveLength(4);
+  expect(model.doStreamCalls[3]?.toolChoice).toEqual({ type: "none" });
+});
+
+test("the final step blocks a tool even when the provider ignores toolChoice none", async () => {
+  const model = scriptedModel([toolStep("ping", "last")]);
+  let executions = 0;
+  const tools = {
+    ping: tool({
+      inputSchema: jsonSchema({ type: "object" }),
+      execute: async () => {
+        executions += 1;
+        return { ok: true };
+      },
+    }),
+  };
+  await drain(base(model, { tools, stepCap: 1 }));
+  expect(executions).toBe(0);
+  expect(model.doStreamCalls[0]?.toolChoice).toEqual({ type: "none" });
+});
+
+test("steering continuations share the original total step budget", async () => {
+  const model = scriptedModel(
+    Array.from({ length: 10 }, () => textStep("answer"))
+  );
+  let drainCount = 0;
+  await drain(
+    base(model, {
+      stepCap: 3,
+      drainSteers: () => {
+        drainCount += 1;
+        return drainCount % 2 === 0 ? ["continue"] : [];
+      },
+    })
+  );
+  expect(model.doStreamCalls).toHaveLength(3);
+  expect(model.doStreamCalls[2]?.toolChoice).toEqual({ type: "none" });
 });

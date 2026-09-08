@@ -1,24 +1,21 @@
-import {
-  isStepCount,
-  streamText,
-  wrapLanguageModel,
-  type ModelMessage,
-  type TextStreamPart,
-  type ToolSet,
-} from "ai";
+import { isStepCount, streamText, wrapLanguageModel } from "ai";
+import type { ModelMessage, TextStreamPart, ToolSet } from "ai";
 
 import { MAX_OUTPUT_TOKENS, STEP_CAP, STREAM_STALL } from "./limits";
-import { stallWatchdog, type StallLimits } from "./stall-watchdog";
+import { stallWatchdog } from "./stall-watchdog";
+import type { StallLimits } from "./stall-watchdog";
 import {
   CHURN_NUDGE,
   DOOM_LOOP_NUDGE,
   DOOM_LOOP_STOP,
   CYCLE_WINDOW,
-  noCycleLoop,
-  noDoomLoop,
+  isCycleLoop,
+  isDoomLoop,
+  failedActionSteps,
   resultChurn,
   trailingRepeat,
 } from "./stop-conditions";
+import { ToolFailure } from "./tool-errors";
 
 /** A resolved model OBJECT, as `wrapLanguageModel` accepts it — a bare id
  *  (the other arm of the SDK's `LanguageModel` union) would route through the
@@ -29,7 +26,6 @@ type ModelObject = Parameters<typeof wrapLanguageModel>[0]["model"];
  *  again only when a steer arrived after the model stopped calling tools;
  *  this caps how many such continuations one turn may take. */
 const MAX_STEER_ROUNDS = 8;
-
 /** The harness bar is the tail of every prompt, replaced each step (found by
  *  this marker, never stacked), so the bytes before it stay a stable prefix. */
 const HARNESS_MARK = "[harness]";
@@ -52,6 +48,13 @@ export interface ChatLoopOptions {
   /** Called with the full transcript whenever it grows, so the host can
    *  persist incrementally and strip images from what it stores. */
   readonly onPersist: (transcript: readonly ModelMessage[]) => void;
+  readonly prepareTools?: (
+    stepNumber: number,
+    summaryOnly: boolean
+  ) => string[];
+  readonly providerOptions?: Parameters<
+    typeof streamText
+  >[0]["providerOptions"];
   readonly stepCap?: number | undefined;
   readonly stall?: StallLimits | undefined;
 }
@@ -60,7 +63,6 @@ const isBar = (message: ModelMessage): boolean =>
   message.role === "user" &&
   typeof message.content === "string" &&
   message.content.startsWith(HARNESS_MARK);
-
 /** Strip the previous step's bar and append this step's, so it is replaced
  *  rather than stacked. */
 const withHarnessBar = (
@@ -70,7 +72,6 @@ const withHarnessBar = (
   ...messages.filter((message) => !isBar(message)),
   { role: "user", content: bar },
 ];
-
 /** Keep the wire prompt bounded by dropping whole user-delimited turns from
  *  the front, so tool-call/result pairs are never split. */
 const TRANSCRIPT_CHAR_CAP = 100_000;
@@ -87,7 +88,6 @@ const trim = (messages: readonly ModelMessage[]): ModelMessage[] => {
   }
   return kept;
 };
-
 const steerMessages = (steers: readonly string[]): ModelMessage[] =>
   steers.map((text, index) => ({
     role: "user" as const,
@@ -100,6 +100,7 @@ const steerMessages = (steers: readonly string[]): ModelMessage[] =>
 interface StepLike {
   readonly toolCalls?: readonly { toolName: string; input: unknown }[];
   readonly toolResults?: readonly { toolName: string; output: unknown }[];
+  readonly content?: readonly { type: string; error?: unknown }[];
 }
 
 /** The status line the model reads about its own turn: step budget, and the
@@ -110,8 +111,8 @@ const renderBar = (
   steps: readonly StepLike[],
   pendingSteers: number
 ): string => {
-  const lines = [`step ${String(stepNumber + 1)}/${String(stepCap)}`];
-  const repeat = trailingRepeat(steps);
+  const lines = [`step ${String(stepNumber + 1)}/${String(stepCap)}`],
+    repeat = trailingRepeat(steps);
   if (repeat !== null && repeat.count >= DOOM_LOOP_NUDGE) {
     lines.push(
       `repeats: you made the same tool call ${String(repeat.count)} times in a row with identical arguments. The turn ends at ×${String(DOOM_LOOP_STOP)} identical call+result. Use different arguments, choose another tool, or say what you have and stop.`
@@ -130,7 +131,7 @@ const renderBar = (
   }
   if (stepNumber >= stepCap - 1) {
     lines.push(
-      `LAST STEP: this is step ${String(stepCap)} of ${String(stepCap)}. Do not call tools — a call made now runs but you will not see its result. State what is done, what you observed, and what remains.`
+      `LAST STEP: this is step ${String(stepCap)} of ${String(stepCap)}. Tools are disabled for this final summary. State what is done, what you observed, and what remains.`
     );
   }
   return `${HARNESS_MARK}\n${lines.join("\n")}`;
@@ -138,7 +139,7 @@ const renderBar = (
 
 /**
  * One chat turn on the SDK's step loop: a single `streamText` with the step
- * cap and the loop guards as `stopWhen`, a stall watchdog over the raw
+ * cap and a reserved summary step, a stall watchdog over the raw
  * provider stream, and a `prepareStep` that injects captured frames, drains
  * steers and appends the harness bar. Wrapped in a thin rounds loop so a
  * steer that arrives after the model stopped calling tools starts another
@@ -153,18 +154,56 @@ export const runChatLoop = (
     middleware: [stallWatchdog(opts.stall ?? STREAM_STALL)],
   });
   const transcript: ModelMessage[] = [...opts.history];
-
+  const completedSteps: StepLike[] = [];
+  let totalSteps = 0;
+  let summaryOnly = false;
+  let allowed = new Set(Object.keys(opts.tools));
+  const guardedTools: ToolSet = Object.fromEntries(
+    Object.entries(opts.tools).map(([name, definition]) => {
+      const { execute } = definition;
+      return [
+        name,
+        execute
+          ? {
+              ...definition,
+              execute: async (input, context) => {
+                if (summaryOnly || !allowed.has(name))
+                  throw new ToolFailure({
+                    code: "TOOL_NOT_AVAILABLE",
+                    detail:
+                      "Tools are disabled for this step. Summarize the measured results and failures.",
+                  });
+                return await execute(input, context);
+              },
+            }
+          : definition,
+      ];
+    })
+  );
   const runRound = (): AsyncIterable<TextStreamPart<ToolSet>> => {
     const result = streamText({
       model,
       instructions: opts.instructions,
       messages: transcript,
-      tools: opts.tools,
-      stopWhen: [isStepCount(stepCap), noDoomLoop, noCycleLoop],
+      tools: guardedTools,
+      providerOptions: opts.providerOptions ?? {},
+      stopWhen: [
+        isStepCount(Math.max(1, stepCap - totalSteps)),
+        () => summaryOnly,
+      ],
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       abortSignal: opts.abortSignal,
       maxRetries: 0,
-      prepareStep: ({ messages, stepNumber, steps }) => {
+      prepareStep: ({ messages }) => {
+        summaryOnly =
+          totalSteps >= stepCap - 1 ||
+          isDoomLoop(completedSteps) ||
+          isCycleLoop(completedSteps) ||
+          failedActionSteps(completedSteps) >= 3;
+        allowed = new Set(
+          opts.prepareTools?.(totalSteps, summaryOnly) ??
+            (summaryOnly ? [] : Object.keys(opts.tools))
+        );
         // Frames captured in the prior step's tools, then steers, become real
         // transcript messages (persisted); the bar is a transient tail.
         const images = opts.drainImages();
@@ -185,13 +224,20 @@ export const runChatLoop = (
           base.push(message);
         }
         return {
+          activeTools: [...allowed],
+          ...(summaryOnly ? { toolChoice: "none" as const } : {}),
           messages: withHarnessBar(
             trim(base),
-            renderBar(stepNumber, stepCap, steps, steers.length)
+            renderBar(totalSteps, stepCap, completedSteps, steers.length) +
+              (summaryOnly
+                ? "\nTools are disabled. Explain the measured outcome or recurring failure; do not claim an unfinished action succeeded."
+                : "")
           ),
         };
       },
       onStepFinish: (step) => {
+        totalSteps += 1;
+        completedSteps.push(step);
         transcript.push(...step.response.messages);
         opts.onPersist(transcript);
       },
@@ -205,6 +251,9 @@ export const runChatLoop = (
       yield* runRound();
       // A steer that landed after the model stopped calling tools is not seen
       // by any `prepareStep`; run one more round so it is answered.
+      if (summaryOnly || totalSteps >= stepCap) {
+        break;
+      }
       const steers = opts.drainSteers();
       if (steers.length === 0) {
         break;

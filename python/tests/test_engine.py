@@ -316,3 +316,65 @@ def test_ledger_evicts_finished_operations_and_keeps_active(rig):
     assert len(e.operations) <= 10000
     # The freshly accepted (active) operation is retained, not evicted.
     assert ("agent", "fresh") in e.operations
+
+
+def test_stale_acquisition_cannot_cross_stop_or_takeover(rig):
+    e, _ = rig
+    observation = e.observe()
+    guard = {
+        "expected_boot_id": observation["boot_id"],
+        "expected_control_epoch": observation["control_epoch"],
+    }
+    e.stop()
+    with pytest.raises(ControlError, match="stale acquisition"):
+        e.acquire("late", **guard)
+    assert e.lease is None
+    guard["expected_control_epoch"] = e.control_epoch
+    human = e.acquire("human", "human", True)
+    e.release(human["lease_id"], "human")
+    with pytest.raises(ControlError, match="stale acquisition"):
+        e.acquire("late", **guard)
+    with pytest.raises(ControlError, match="restarted"):
+        e.acquire("late", expected_boot_id="old-boot")
+    assert e.lease is None
+
+
+def test_request_lookup_reconciles_without_a_live_lease(rig):
+    e, c = rig
+    lease = e.acquire("a")
+    op = e.submit("lost-reply", lease["lease_id"], "a", target={"gripper": 42})
+    advance(e, c, 1.5)
+    e.release(lease["lease_id"], "a")
+    result = e.find_operation("a", "lost-reply", e.boot_id)
+    assert result["id"] == op["id"]
+    assert result["status"] == "completed"
+    assert result["measured"]["gripper"] == pytest.approx(42)
+    assert e.find_operation("other", "lost-reply", e.boot_id) is None
+    with pytest.raises(ControlError, match="unknown"):
+        e.find_operation("a", "lost-reply", "old-boot")
+
+
+def test_cancel_pending_owner_preserves_human_control(rig):
+    e, _ = rig
+    guard = {"expected_boot_id": e.boot_id, "expected_control_epoch": e.control_epoch}
+    e.cancel_owner("pending", e.boot_id)
+    with pytest.raises(ControlError, match="stale acquisition"):
+        e.acquire("pending", **guard)
+    human = e.acquire("human", "human", True)
+    e.cancel_owner("pending", e.boot_id)
+    assert e.lease["id"] == human["lease_id"]
+    assert e.renew(human["lease_id"], "human")["owner"] == "human"
+
+
+def test_terminal_operation_keeps_its_measured_snapshot(rig):
+    e, c = rig
+    lease = e.acquire("agent")
+    op = e.submit("snapshot", lease["lease_id"], "agent", target={"gripper": 45}, duration_s=1)
+    advance(e, c, 1.2)
+    completed = e.get_operation(op["id"])
+    assert completed["status"] == "completed"
+    e.submit("later", lease["lease_id"], "agent", target={"gripper": 50}, duration_s=1)
+    advance(e, c, 1.2)
+    assert e.measured["gripper"] == pytest.approx(50)
+    assert e.get_operation(op["id"])["measured"] == completed["measured"]
+    assert e.find_operation("agent", "snapshot", e.boot_id)["residual"] == completed["residual"]

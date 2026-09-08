@@ -56,3 +56,9 @@ Use the workbench Stop/Hold button to cancel motion and revoke control. Stopping
 ## Remaining optional work
 
 Built-in chat still needs an explicitly configured provider account; external LLMs already use MCP. SAM3/depth inference is optional and needs a worker/model setup. Camera extrinsics, Cartesian picking, leader-following motion, and a dedicated Pi development shell have not been physically commissioned. Netcup's development container and robot API are working now.
+
+## Chat action upgrade — 2026-09-08
+
+Chat motion now requires the guarded motor service (`control_epoch` in observations). Promote the tested `engine.py` and `service.py` together before restarting the coordinator. Back up the deployed Python files, compare their hashes with the reviewed baseline, and check that the robot is idle and fault-free before restarting `robo-io`. Stop retains commanded hold and torque. Do not run recalibration or startup recovery as part of this upgrade.
+
+The coordinator stores an additive `chat_actions` ledger in its existing database. Pending/unknown actions cannot replay after restart. The lease stays at three seconds and is renewed only inside a bounded action. The new model capability catalog automatically enables documented image support when no explicit disable is configured; legacy `ROBO_ALIBABA_VISION=0` still disables it.

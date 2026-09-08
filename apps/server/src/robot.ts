@@ -3,6 +3,8 @@ import type { MoveInput } from "@robo/protocol";
 import { Schema } from "effect";
 
 import { config } from "./config";
+import { revokeAgentControl } from "./control-lifecycle";
+import type { MotionIO } from "./motion-actions";
 import { emit } from "./store";
 
 export class ApiError extends Error {
@@ -16,7 +18,8 @@ async function io<S extends Schema.Codec<any>>(
   path: string,
   schema: S,
   body?: unknown,
-  timeoutMs = 2000
+  timeoutMs = 2000,
+  signal?: AbortSignal
 ): Promise<S["Type"]> {
   const res = await fetch(config.ioUrl + path, {
     method: body === undefined ? "GET" : "POST",
@@ -25,7 +28,9 @@ async function io<S extends Schema.Codec<any>>(
       "Content-Type": "application/json",
     },
     body: body === undefined ? null : JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs),
   });
   const data: unknown = await res.json();
   if (!res.ok) {
@@ -137,6 +142,7 @@ export async function sample() {
     domain: current.clock_domain,
   };
   if (prev?.boot_id !== current.boot_id) {
+    if (prev) revokeAgentControl("Robot restarted");
     controllers.clear();
     for (const [camera, cached] of cachedFrames) {
       if (cached.frame.clock_domain !== current.clock_domain)
@@ -196,6 +202,8 @@ export async function acquire(
     );
   }
   refuseWhileStopping();
+  if (human && (mode !== "agent" || takeover))
+    revokeAgentControl("Human operator took control");
   const lease = await io("/control/acquire", Lease, {
     owner,
     mode,
@@ -285,6 +293,7 @@ export async function move(owner: string, body: MoveInput) {
 // Local leases are revoked whether or not the robot confirmed: with no
 // heartbeat left, the motor owner cancels motion when the lease expires.
 export async function stop() {
+  revokeAgentControl("Stopped by operator");
   stopping = true;
   try {
     let failure: unknown;
@@ -314,3 +323,79 @@ export async function stop() {
 }
 export const operation = (id: string) =>
   io(`/operations/${encodeURIComponent(id)}`, Operation);
+
+// Action leases stay scoped to the executor; they never enter the manual
+// controller map. Every request still reaches the single Python motor owner.
+export const motionIO: MotionIO = {
+  observe: async (signal) => {
+    const started = performance.now();
+    const value = await io("/observe", Observation, undefined, 2000, signal);
+    return { ...value, age_ms: value.age_ms + performance.now() - started };
+  },
+  acquire: (owner, observation, signal) =>
+    io(
+      "/control/acquire",
+      Lease,
+      {
+        owner,
+        mode: "agent",
+        takeover: false,
+        expected_boot_id: observation.boot_id,
+        expected_control_epoch: observation.control_epoch,
+      },
+      2000,
+      signal
+    ),
+  renew: (lease, signal) =>
+    io(
+      "/control/renew",
+      Lease,
+      {
+        owner: lease.owner,
+        lease_id: lease.lease_id,
+      },
+      1000,
+      signal
+    ),
+  submit: (lease, input, signal) =>
+    io(
+      "/operations",
+      Operation,
+      {
+        ...input,
+        owner: lease.owner,
+        lease_id: lease.lease_id,
+      },
+      2000,
+      signal
+    ),
+  operation: (id, signal) =>
+    io(
+      `/operations/${encodeURIComponent(id)}`,
+      Operation,
+      undefined,
+      2000,
+      signal
+    ),
+  find: (owner, requestId, bootId, signal) =>
+    io(
+      `/operations/request?${new URLSearchParams({ owner, request_id: requestId, boot_id: bootId })}`,
+      Schema.NullOr(Operation),
+      undefined,
+      2000,
+      signal
+    ),
+  release: async (lease) => {
+    await io("/control/release", Schema.Unknown, {
+      owner: lease.owner,
+      lease_id: lease.lease_id,
+    });
+  },
+  cancel: async (owner, bootId) => {
+    await io("/control/cancel-owner", Schema.Unknown, {
+      owner,
+      boot_id: bootId,
+    });
+  },
+  rejected: (error) => error instanceof ApiError && error.status < 500,
+};

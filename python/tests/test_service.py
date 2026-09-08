@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from robo_harness.drivers import LeRobotDriver, MockDriver
-from robo_harness.service import create_app
+from robo_harness.service import Move, create_app
 
 ROOT = Path(__file__).resolve().parents[2]
 TOKEN = "test-token-with-more-than-24-characters"
@@ -95,3 +96,14 @@ def test_leader_connect_does_not_block_observe(monkeypatch):
         release.set()
         worker.join(timeout=3)
         assert result["response"].status_code == 200
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("duration_s", "1"), ("duration_s", True), ("target", {"gripper": "42"}), ("target", {"gripper": True})],
+)
+def test_motion_http_types_are_strict(field, value):
+    body = {"owner": "test", "lease_id": "test", "request_id": "test", "target": {"gripper": 42}}
+    body[field] = value
+    with pytest.raises(ValidationError):
+        Move.model_validate(body)

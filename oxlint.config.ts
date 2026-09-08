@@ -95,6 +95,30 @@ export default defineConfig({
     ".codex/**",
     ".grok/**",
   ],
+  overrides: [
+    {
+      files: [
+        "apps/server/src/motion-actions.ts",
+        "apps/server/src/action-ledger.ts",
+        "apps/server/src/chat-tools.ts",
+        "apps/server/src/control-lifecycle.ts",
+        "apps/server/src/tool-errors.ts",
+        "apps/server/src/model-capabilities.ts",
+      ],
+      // New Effect modules do not inherit the migration's unsafe-type escape hatches.
+      rules: {
+        "typescript/no-explicit-any": "error",
+        "typescript/no-non-null-assertion": "error",
+        "typescript/no-unsafe-argument": "error",
+        "typescript/no-unsafe-assignment": "error",
+        "typescript/no-unsafe-call": "error",
+        "typescript/no-unsafe-member-access": "error",
+        "typescript/no-unsafe-return": "error",
+        "typescript/no-floating-promises": "error",
+        "typescript/no-misused-promises": "error",
+      },
+    },
+  ],
   rules: {
     "boundaries/no-cross-boundary-import": "error",
     "eslint/sort-keys": "off",
