@@ -27,7 +27,20 @@ export interface Status {
     version: string;
   };
   clock: { uncertainty_ms: number };
-  perception: { configured: boolean; provider: string; cost_usd: number };
+  perception: {
+    configured: boolean;
+    provider: string;
+    cost_usd: number;
+    capabilities: Record<
+      "segment" | "depth",
+      {
+        configured: boolean;
+        ready: boolean;
+        model: string;
+        reason: string | null;
+      }
+    >;
+  };
   budget: { limit_usd: number; spent_usd: number } | null;
 }
 export interface Recorded {

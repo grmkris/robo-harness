@@ -212,6 +212,7 @@ export function App() {
             onReload={() => setViewerKey((v) => v + 1)}
           />
           <PerceptionBar
+            settings={status.perception}
             camera={camera}
             setCamera={setCamera}
             perceptionPrompt={perceptionPrompt}

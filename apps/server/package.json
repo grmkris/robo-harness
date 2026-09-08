@@ -9,6 +9,10 @@
     "@tanstack/ai": "0.53.0",
     "@tanstack/ai-openai": "0.22.5",
     "effect": "4.0.0-rc.112",
-    "openai": "6.49.0"
+    "openai": "6.49.0",
+    "pngjs": "7.0.0"
+  },
+  "devDependencies": {
+    "@types/pngjs": "6.0.5"
   }
 }

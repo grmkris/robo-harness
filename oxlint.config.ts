@@ -109,6 +109,8 @@ export default defineConfig({
         "apps/server/src/control-lifecycle.ts",
         "apps/server/src/tool-errors.ts",
         "apps/server/src/model-capabilities.ts",
+        "apps/server/src/fal-perception.ts",
+        "apps/server/src/perception.ts",
       ],
       // New Effect modules do not inherit the migration's unsafe-type escape hatches.
       rules: {

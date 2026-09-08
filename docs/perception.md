@@ -26,3 +26,11 @@ The app does not create persistent GPU pods automatically. Operator-provisioned 
 Model inference, licensed checkpoint access, hosted endpoints, and paid billing have not been exercised without configured credentials/GPU hardware. Unit tests can validate contracts without representing synthetic output as model inference.
 
 For a fixed-camera baseline with measured ground truth, use the [offline tabletop calibration workflow](tabletop-calibration.md). It produces image overlays and held-out error reports without running a perception model.
+
+## Catalog fal adapters
+
+`ROBO_FAL_SEGMENT_ENDPOINT=fal-ai/sam-3/image` selects SAM 3. `ROBO_FAL_DEPTH_ENDPOINT=fal-ai/image-preprocessors/depth-anything/v2` selects a Depth Anything V2 relative-depth preview. Both use `FAL_KEY` in the coordinator service configuration. These are fixed adapters with validated output, not arbitrary interchangeable model names. Per-capability status explains missing configuration or budget before the UI offers a request.
+
+SAM 3 masks retain source-frame geometry and include pixel area/bounds. Depth previews carry their actual dimensions and a scale back to source pixels; no numeric metric depth is claimed. Hosted model revisions are labeled unpinned. The original private worker and custom endpoint contracts remain available.
+
+The deployed conservative reservation is $0.05 per request. This is a budget reservation ceiling, not a quoted model price. Approve the total cap in Activity before sending any paid request. The provider receives the chosen camera image and prompt; recordings and exports do not require this transfer.

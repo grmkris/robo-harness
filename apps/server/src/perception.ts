@@ -1,8 +1,15 @@
 import { mkdir, writeFile } from "node:fs/promises";
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import { config } from "./config";
+import {
+  FAL_SEGMENT,
+  FAL_DEPTH,
+  falInput,
+  normalizeFal,
+  runFalRequest,
+} from "./fal-perception";
 import { capture, ApiError } from "./robot";
 import { db, emit } from "./store";
 
@@ -24,12 +31,23 @@ const resultSchema = Schema.Struct({
   width: Pixels,
   height: Pixels,
   preview_png: Schema.String,
+  provider_request_id: Schema.optionalKey(Schema.String),
+  note: Schema.optionalKey(Schema.String),
+  preview_width: Schema.optionalKey(Pixels),
+  preview_height: Schema.optionalKey(Pixels),
+  preview_to_image: Schema.optionalKey(
+    Schema.Array(Schema.Array(Schema.Finite))
+  ),
   masks: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
         png: Schema.String,
         label: Schema.String,
         score: Schema.optionalKey(Schema.Finite),
+        area_pixels: Schema.optionalKey(Schema.Int),
+        bounds_pixels: Schema.optionalKey(
+          Schema.NullOr(Schema.Array(Schema.Finite))
+        ),
       })
     )
   ),
@@ -58,14 +76,65 @@ export function setBudget(limit: number) {
   emit("budget.updated", { limit_usd: limit });
   return budget();
 }
-export function perceptionConfig() {
+const backend = (kind: "segment" | "depth") => {
+  const catalog =
+    process.env[
+      kind === "segment"
+        ? "ROBO_FAL_SEGMENT_ENDPOINT"
+        : "ROBO_FAL_DEPTH_ENDPOINT"
+    ];
+  if (catalog)
+    return {
+      provider: "fal",
+      endpoint: catalog,
+      catalog: true,
+      configured:
+        Boolean(process.env["FAL_KEY"]) &&
+        catalog === (kind === "segment" ? FAL_SEGMENT : FAL_DEPTH),
+    };
+  const custom = process.env["ROBO_FAL_ENDPOINT"];
+  if (custom)
+    return {
+      provider: "fal",
+      endpoint: custom,
+      catalog: false,
+      configured: Boolean(process.env["FAL_KEY"]),
+    };
   return {
+    provider: "worker",
+    endpoint: process.env["ROBO_PERCEPTION_URL"] ?? "",
+    catalog: false,
     configured: Boolean(
-      process.env["ROBO_PERCEPTION_URL"] || process.env["ROBO_FAL_ENDPOINT"]
+      process.env["ROBO_PERCEPTION_URL"] && process.env["ROBO_PERCEPTION_TOKEN"]
     ),
-    provider: process.env["ROBO_FAL_ENDPOINT"] ? "fal" : "worker",
-    cost_usd: Number(process.env["ROBO_PERCEPTION_COST_USD"] ?? 0),
-    budget: budget(),
+  };
+};
+export function perceptionConfig() {
+  const segment = backend("segment");
+  const depth = backend("depth");
+  const cost = Number(process.env["ROBO_PERCEPTION_COST_USD"] ?? 0);
+  const approved = budget();
+  const funded =
+    Number.isFinite(cost) &&
+    cost > 0 &&
+    Boolean(approved && approved.spent_usd + cost <= approved.limit_usd);
+  const capability = (item: ReturnType<typeof backend>) => ({
+    configured: item.configured,
+    ready: item.configured && funded,
+    model: item.catalog ? item.endpoint : item.provider,
+    reason: item.configured
+      ? funded
+        ? null
+        : "Approve a perception budget in Activity"
+      : "Provider or credentials are not configured",
+  });
+  return {
+    configured: segment.configured || depth.configured,
+    provider:
+      segment.provider === "fal" || depth.provider === "fal" ? "fal" : "worker",
+    cost_usd: Number.isFinite(cost) ? cost : 0,
+    budget: approved,
+    capabilities: { segment: capability(segment), depth: capability(depth) },
   };
 }
 export async function perceive(
@@ -78,9 +147,10 @@ export async function perceive(
   signal?: AbortSignal
 ) {
   const settings = perceptionConfig();
-  if (!settings.configured) {
+  const selected = backend(input.kind);
+  if (!selected.configured) {
     throw new ApiError(
-      "Configure a perception worker or compatible fal endpoint first",
+      "Configure a provider and credentials for the requested perception capability first",
       422
     );
   }
@@ -134,77 +204,38 @@ export async function perceive(
   };
   try {
     let raw: unknown;
-    if (process.env["ROBO_FAL_ENDPOINT"]) {
-      const endpoint = process.env["ROBO_FAL_ENDPOINT"];
-      if (!/^[a-zA-Z0-9_/-]+$/.test(endpoint)) {
-        throw new Error("Invalid configured fal endpoint");
-      }
-      const headers = {
-        Authorization: `Key ${process.env["FAL_KEY"]}`,
-        "Content-Type": "application/json",
-      };
-      const queued = await submit(`https://queue.fal.run/${endpoint}`, headers);
-      if (!queued.ok) {
-        throw new Error("fal rejected the inference request");
-      }
-      const job = (await queued.json()) as {
-        status_url: string;
-        response_url: string;
-        cancel_url: string;
-      };
-      const trusted = (value: string) => {
-        const u = new URL(value);
-        if (u.origin !== "https://queue.fal.run") {
-          throw new Error("Unexpected fal job URL");
-        }
-        return value;
-      };
-      try {
-        while (true) {
-          combined.throwIfAborted();
-          const response = await fetch(trusted(job.status_url), {
-            headers,
-            signal: combined,
-          });
-          if (!response.ok) {
-            throw new Error("fal status request failed");
-          }
-          const state = (await response.json()) as {
-            status: string;
-            error?: string;
-          };
-          if (state.error) {
-            throw new Error("fal inference failed");
-          }
-          if (state.status === "COMPLETED") {
-            break;
-          }
-          await Bun.sleep(500);
-        }
-        const response = await fetch(trusted(job.response_url), {
-          headers,
-          signal: combined,
-        });
-        if (!response.ok) {
-          throw new Error("fal result unavailable");
-        }
-        raw = await response.json();
-      } catch (error) {
-        await fetch(trusted(job.cancel_url), {
-          method: "PUT",
-          headers,
-          signal: AbortSignal.timeout(5000),
-        }).catch(() => {});
-        throw error;
-      }
-    } else {
-      const response = await submit(
-        `${process.env["ROBO_PERCEPTION_URL"]!}/infer`,
-        {
-          Authorization: `Bearer ${process.env["ROBO_PERCEPTION_TOKEN"]}`,
-          "Content-Type": "application/json",
-        }
+    if (selected.provider === "fal") {
+      const output = await Effect.runPromise(
+        runFalRequest({
+          endpoint: selected.endpoint,
+          key: process.env["FAL_KEY"] ?? "",
+          body: selected.catalog
+            ? falInput(frame, input.kind, input.prompt)
+            : { kind: input.kind, prompt: input.prompt, frame },
+          onSubmit: () => {
+            keepReservation = true;
+          },
+          onRejected: () => {
+            keepReservation = false;
+          },
+        }).pipe(Effect.scoped),
+        { signal: combined }
       );
+      raw = selected.catalog
+        ? await normalizeFal({
+            kind: input.kind,
+            raw: output.result,
+            frame,
+            prompt: input.prompt,
+            requestId: output.request_id,
+            signal: combined,
+          })
+        : output.result;
+    } else {
+      const response = await submit(`${selected.endpoint}/infer`, {
+        Authorization: `Bearer ${process.env["ROBO_PERCEPTION_TOKEN"]}`,
+        "Content-Type": "application/json",
+      });
       if (!response.ok) {
         throw new Error(
           "Perception worker failed with status " + response.status
