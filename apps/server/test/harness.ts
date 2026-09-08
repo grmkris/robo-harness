@@ -61,6 +61,7 @@ async function drain(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
 }
 
 export interface Harness {
+  readonly dataDir: string;
   readonly base: string;
   readonly port: number;
   readonly requests: Record<string, unknown>[];
@@ -229,7 +230,17 @@ export async function startHarness(
     await rm(directory, { recursive: true, force: true });
   };
 
-  return { base, port, requests, request, call, status, until, close };
+  return {
+    dataDir: directory,
+    base,
+    port,
+    requests,
+    request,
+    call,
+    status,
+    until,
+    close,
+  };
 }
 
 function startFixture(
