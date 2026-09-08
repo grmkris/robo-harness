@@ -396,3 +396,26 @@ def test_real_profile_cartesian_gate_keeps_bounded_joint_probes_available(rig):
     assert engine.get_operation(operation["id"])["status"] == "completed"
     assert engine.measured["shoulder_pan"] == pytest.approx(1)
     assert engine.observe()["cartesian"] is False
+
+
+def test_unresponsive_joint_fails_and_owner_cleanup_preserves_result(rig):
+    e, c = rig
+    e.driver.write = lambda values: None
+    lease = e.acquire("probe")
+    op = e.submit("small-probe", lease["lease_id"], "probe", target={"shoulder_pan": 1}, duration_s=1.5)
+    for _ in range(4):
+        e.renew(lease["lease_id"], "probe")
+        advance(e, c, 1)
+    failed = e.get_operation(op["id"])
+    assert failed["status"] == "failed"
+    assert failed["reason"] == "Target did not settle before deadline"
+    assert failed["measured"]["shoulder_pan"] == 0
+    assert failed["residual"]["shoulder_pan"] == 1
+    assert e.observe()["operator"] is None
+    assert e.fault is None
+    assert e.commanded["shoulder_pan"] == 1
+    with pytest.raises(ControlError, match="lease is absent"):
+        e.release(lease["lease_id"], "probe")
+    assert e.cancel_owner("probe", e.boot_id) == {"cancelled": True}
+    assert e.get_operation(op["id"]) == failed
+    assert e.commanded["shoulder_pan"] == 1

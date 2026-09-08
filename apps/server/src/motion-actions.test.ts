@@ -121,6 +121,7 @@ const rig = () => {
     find: async () => state.op,
     release: async (lease) => {
       state.releases += 1;
+      check(lease);
       if (state.owner === lease.owner) state.owner = "";
     },
     cancel: async (owner) => {
@@ -128,7 +129,8 @@ const rig = () => {
       state.epoch += 1;
       if (state.owner === owner) {
         state.owner = "";
-        if (state.op) state.op = { ...state.op, status: "cancelled" };
+        if (state.op && ["accepted", "running"].includes(state.op.status))
+          state.op = { ...state.op, status: "cancelled" };
       }
     },
     rejected: () => false,
@@ -382,4 +384,59 @@ test("uncommissioned XYZ is refused without disabling bounded joint exploration"
   expect(probe.status).toBe("completed");
   expect(r.state.submits).toBe(1);
   expect(r.state.owner).toBe("");
+});
+
+test("motor timeout with an already-dropped lease confirms cleanup without hiding failure", async () => {
+  const r = rig();
+  r.io.operation = async () => {
+    if (!r.state.op) throw new Error("No operation");
+    r.state.owner = "";
+    r.state.op = {
+      ...r.state.op,
+      status: "failed",
+      reason: "Target did not settle before deadline",
+      measured: pose,
+      residual: { ...pose, gripper: 2 },
+    };
+    return r.state.op;
+  };
+  const result = await r.executor.execute(request());
+  expect(result.status).toBe("failed");
+  expect(result.operation?.measured).toEqual(pose);
+  expect(result.message).toContain("Target did not settle before deadline");
+  expect(result.message).not.toContain("cleanup was not confirmed");
+  expect(r.state.releases).toBe(1);
+  expect(r.state.cancels).toBe(1);
+  expect(r.state.submits).toBe(1);
+  expect(await r.executor.execute(request())).toEqual(result);
+  expect(r.state.acquires).toBe(1);
+});
+
+test("lost release reply is reconciled while preserving a new human controller", async () => {
+  const r = rig();
+  r.io.release = async () => {
+    r.state.owner = "human";
+    throw new Error("Release reply lost; human acquired afterward");
+  };
+  const result = await r.executor.execute(request());
+  expect(result.status).toBe("completed");
+  expect(result.message).not.toContain("cleanup was not confirmed");
+  expect(r.state.cancels).toBe(1);
+  expect(r.state.owner).toBe("human");
+});
+
+test("unconfirmed terminal cleanup keeps the warning and stops renewal", async () => {
+  const r = rig();
+  r.io.release = async () => {
+    throw new Error("Network unavailable");
+  };
+  r.io.cancel = async () => {
+    throw new Error("Network unavailable");
+  };
+  const result = await r.executor.execute(request());
+  expect(result.status).toBe("completed");
+  expect(result.message).toContain("Ownership cleanup was not confirmed");
+  const renewals = r.state.renews;
+  await Bun.sleep(25);
+  expect(r.state.renews).toBe(renewals);
 });

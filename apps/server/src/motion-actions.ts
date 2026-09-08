@@ -223,9 +223,19 @@ export const createMotionExecutor = (
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
           try {
-            await (terminalConfirmed && lease
-              ? io.release(lease)
-              : io.cancel(record.owner, observation.boot_id));
+            if (terminalConfirmed && lease) {
+              try {
+                await io.release(lease);
+              } catch {
+                // The motor owner drops a timed-out lease before we see the
+                // terminal operation. Confirm cleanup by owner/boot instead;
+                // this also handles a lost release reply without touching a
+                // newer controller's lease.
+                await io.cancel(record.owner, observation.boot_id);
+              }
+            } else {
+              await io.cancel(record.owner, observation.boot_id);
+            }
           } catch {
             cleanupFailed = true;
           }
