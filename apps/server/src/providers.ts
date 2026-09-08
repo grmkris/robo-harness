@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { ProviderInfo } from "@robo/domain";
 
+import { modelCapabilities } from "./model-capabilities";
 import { ApiError } from "./robot";
 
 const alibaba =
@@ -68,6 +69,35 @@ export async function catalog(): Promise<ProviderInfo[]> {
     process.env["ROBO_XAI_MODEL"] ?? "grok-4.6",
     "ROBO_XAI_MODELS"
   );
+  const capabilityList = (
+    provider: string,
+    endpoint: string,
+    models: string[]
+  ) => {
+    const prefix = `ROBO_${provider.toUpperCase()}`;
+    const visionModels = (process.env[`${prefix}_VISION_MODELS`] ?? "")
+      .split(",")
+      .map((value) => value.trim());
+    // Legacy opt-in applies only to the default model, never all extra models.
+    if (process.env[`${prefix}_VISION`] === "1" && models[0])
+      visionModels.push(models[0]);
+    return models.map((name) =>
+      modelCapabilities(provider, endpoint, name, {
+        visionModels,
+        disableVision: process.env[`${prefix}_VISION`] === "0",
+      })
+    );
+  };
+  const alibabaCapabilities = capabilityList(
+    "alibaba",
+    process.env["ROBO_ALIBABA_URL"] ?? alibaba,
+    alibabaModels
+  );
+  const xaiCapabilities = capabilityList(
+    "xai",
+    "https://api.x.ai/v1",
+    xaiModels
+  );
   return [
     {
       id: "alibaba",
@@ -75,7 +105,8 @@ export async function catalog(): Promise<ProviderInfo[]> {
       available: Boolean(alibabaKey()),
       model: alibabaModels[0] ?? "qwen3.8-max",
       models: alibabaModels,
-      vision: process.env["ROBO_ALIBABA_VISION"] === "1",
+      vision: alibabaCapabilities[0]?.image_input ?? false,
+      capabilities: alibabaCapabilities,
       ...(alibabaKey()
         ? {}
         : { reason: "Set DASHSCOPE_API_KEY or ALIBABA_TOKEN_PLAN_API_KEY" }),
@@ -86,7 +117,8 @@ export async function catalog(): Promise<ProviderInfo[]> {
       available: xai,
       model: xaiModels[0] ?? "grok-4.6",
       models: xaiModels,
-      vision: process.env["ROBO_XAI_VISION"] !== "0",
+      vision: xaiCapabilities[0]?.image_input ?? false,
+      capabilities: xaiCapabilities,
       ...(xai
         ? {}
         : {
@@ -99,6 +131,7 @@ export async function catalog(): Promise<ProviderInfo[]> {
       available: false,
       model: "",
       models: [],
+      capabilities: [],
       vision: true,
       reason: "Direct subscription adapter pending verification",
     },
@@ -108,6 +141,7 @@ export async function catalog(): Promise<ProviderInfo[]> {
       available: false,
       model: "",
       models: [],
+      capabilities: [],
       vision: true,
       reason: "Direct subscription adapter pending verification",
     },
@@ -152,5 +186,18 @@ export async function resolveModel(provider: string, model?: string) {
         }
       : {}),
   });
-  return { model: client(chosen), info: { ...info, model: chosen } };
+  const capabilities = info.capabilities.find(
+    (entry) => entry.model === chosen
+  );
+  return {
+    model: client(chosen),
+    info: {
+      ...info,
+      model: chosen,
+      vision: capabilities?.image_input ?? false,
+    },
+    providerOptions: capabilities?.parallel_control
+      ? { [provider]: { parallel_tool_calls: false } }
+      : {},
+  };
 }

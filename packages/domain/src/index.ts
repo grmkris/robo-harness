@@ -36,6 +36,7 @@ export const Operation = Schema.Struct({
     "failed",
   ]),
   target: Pose,
+  measured: Schema.optionalKey(Pose),
   residual: Schema.NullOr(Pose),
   reason: Schema.optionalKey(Schema.String),
 });
@@ -43,6 +44,7 @@ export type Operation = typeof Operation.Type;
 
 export const Observation = Schema.Struct({
   boot_id: Schema.String,
+  control_epoch: Schema.optionalKey(Schema.Int),
   seq: Schema.Int,
   monotonic_s: Schema.Finite,
   wall_time_ms: Schema.Finite,
@@ -119,6 +121,16 @@ export const AppEvent = Schema.Struct({
 });
 export type AppEvent = typeof AppEvent.Type;
 
+export const ModelCapabilities = Schema.Struct({
+  model: Schema.String,
+  image_input: Schema.Boolean,
+  tool_calling: Schema.Boolean,
+  strict_tools: Schema.Boolean,
+  parallel_control: Schema.Boolean,
+  source: Schema.Literals(["documented", "configured", "unverified"]),
+});
+export type ModelCapabilities = typeof ModelCapabilities.Type;
+
 export const ProviderInfo = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -127,6 +139,7 @@ export const ProviderInfo = Schema.Struct({
   // `models[0]`; both are kept so an older client that only reads `model` works.
   model: Schema.String,
   models: Schema.Array(Schema.String),
+  capabilities: Schema.Array(ModelCapabilities),
   vision: Schema.Boolean,
   reason: Schema.optionalKey(Schema.String),
 });

@@ -1063,3 +1063,19 @@ h2 {
   font-size: 10px;
   color: var(--muted);
 }
+
+.model-capability {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.65rem 0;
+  font-size: 0.75rem;
+  color: var(--muted, #737b79);
+}
+.model-capability.vision-enabled {
+  color: #426338;
+}
+.motion-progress {
+  border-left: 2px solid var(--accent, #2d7564);
+  padding-left: 0.85rem;
+}

@@ -9,6 +9,7 @@ export interface ModelOption {
   model: string;
   provider: string;
   providerName: string;
+  vision: boolean;
 }
 
 export function ChatTab({
@@ -52,6 +53,19 @@ export function ChatTab({
   setError: Dispatch<SetStateAction<string>>;
   chatEndRef: RefObject<HTMLDivElement | null>;
 }) {
+  const selectedModel = modelOptions.find(
+    (option) => option.provider === provider && option.model === model
+  );
+  const latestMotion = new Map<string, number>();
+  for (const event of chatEvents) {
+    if (event.type === "chat.motion")
+      latestMotion.set(String(event.data["action_id"]), event.id);
+  }
+  const visibleEvents = chatEvents.filter(
+    (event) =>
+      event.type !== "chat.motion" ||
+      latestMotion.get(String(event.data["action_id"])) === event.id
+  );
   const resetConversation = () => {
     setSession(undefined);
     setDraft("");
@@ -89,6 +103,17 @@ export function ChatTab({
           New
         </button>
       </div>
+      {selectedModel ? (
+        <p
+          className={`model-capability ${selectedModel.vision ? "vision-enabled" : ""}`}
+          aria-label="Model image capability"
+        >
+          <span aria-hidden="true">{selectedModel.vision ? "◉" : "○"}</span>
+          {selectedModel.vision
+            ? "Camera images enabled"
+            : "Text only · camera images unavailable"}
+        </p>
+      ) : null}
       <div className="conversation-row">
         <select
           aria-label="Conversation"
@@ -136,9 +161,9 @@ export function ChatTab({
             </button>
           </div>
         ) : null}
-        {chatEvents.map((e) => (
+        {visibleEvents.map((e) => (
           <article
-            className={`chat-event ${e.data["role"] === "user" ? "user" : ""}`}
+            className={`chat-event ${e.data["role"] === "user" ? "user" : ""} ${e.type === "chat.motion" ? "motion-progress" : ""}`}
             key={e.id}
           >
             <small>
@@ -164,6 +189,11 @@ export function ChatTab({
                 <summary>{String(e.data["name"])} · result</summary>
                 <pre>{JSON.stringify(e.data["output"], null, 2)}</pre>
               </details>
+            ) : e.type === "chat.tool_error" ? (
+              <p>
+                <strong>{String(e.data["name"])}: </strong>
+                {String(e.data["message"])}
+              </p>
             ) : (
               <p>{String(e.data["message"] ?? e.data["text"] ?? "")}</p>
             )}

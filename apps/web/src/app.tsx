@@ -139,6 +139,9 @@ export function App() {
         model: m,
         provider: p.id,
         providerName: p.name,
+        vision:
+          p.capabilities?.find((entry) => entry.model === m)?.image_input ??
+          false,
       }))
     );
   // The optimistic "YOU" bubble is shown until the server echoes the same text
