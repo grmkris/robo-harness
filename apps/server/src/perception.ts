@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 
+import { PerceptionResult } from "@robo/domain";
 import { Effect, Schema } from "effect";
 
 import { config } from "./config";
@@ -10,6 +11,7 @@ import {
   normalizeFal,
   runFalRequest,
 } from "./fal-perception";
+import { active } from "./recordings";
 import { capture, ApiError } from "./robot";
 import { db, emit } from "./store";
 
@@ -19,44 +21,6 @@ const REJECTED_SUBMISSION_STATUSES = new Set([
   400, 401, 403, 404, 405, 413, 415, 422, 429,
 ]);
 
-const Pixels = Schema.Int.check(
-  Schema.isGreaterThan(0),
-  Schema.isLessThanOrEqualTo(4096)
-);
-const resultSchema = Schema.Struct({
-  kind: Schema.Literals(["segment", "depth"]),
-  model: Schema.String,
-  model_version: Schema.String,
-  frame_id: Schema.String,
-  width: Pixels,
-  height: Pixels,
-  preview_png: Schema.String,
-  provider_request_id: Schema.optionalKey(Schema.String),
-  note: Schema.optionalKey(Schema.String),
-  preview_width: Schema.optionalKey(Pixels),
-  preview_height: Schema.optionalKey(Pixels),
-  preview_to_image: Schema.optionalKey(
-    Schema.Array(Schema.Array(Schema.Finite))
-  ),
-  masks: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        png: Schema.String,
-        label: Schema.String,
-        score: Schema.optionalKey(Schema.Finite),
-        area_pixels: Schema.optionalKey(Schema.Int),
-        bounds_pixels: Schema.optionalKey(
-          Schema.NullOr(Schema.Array(Schema.Finite))
-        ),
-      })
-    )
-  ),
-  depth: Schema.optionalKey(Schema.Array(Schema.Array(Schema.Finite))),
-  depth_width: Schema.optionalKey(Schema.Int),
-  depth_height: Schema.optionalKey(Schema.Int),
-  depth_to_image: Schema.optionalKey(Schema.Array(Schema.Array(Schema.Finite))),
-  units: Schema.optionalKey(Schema.Literals(["relative", "meters", "pixels"])),
-});
 export function budget() {
   return db
     .query("SELECT limit_usd,spent_usd FROM budgets WHERE id=1")
@@ -170,7 +134,19 @@ export async function perceive(
     throw new ApiError("Perception budget is absent or exhausted", 402);
   }
   const id = crypto.randomUUID();
-  const source = { ...frame, base64: undefined };
+  const recording = active;
+  const source = {
+    ...frame,
+    base64: undefined,
+    kind: input.kind,
+    prompt: input.prompt,
+    model: selected.endpoint || selected.provider,
+    recording_id:
+      recording && frame.wall_time_ms >= recording.created
+        ? recording.id
+        : null,
+    source_saved: true,
+  };
   db.query(
     "INSERT INTO perception(id,state,source,created) VALUES(?,?,?,?)"
   ).run(id, "running", JSON.stringify(source), Date.now());
@@ -203,6 +179,9 @@ export async function perceive(
     return response;
   };
   try {
+    const path = `${config.dataDir}/perception/${id}`;
+    await mkdir(path, { recursive: true });
+    await writeFile(`${path}/source.jpg`, Buffer.from(frame.base64, "base64"));
     let raw: unknown;
     if (selected.provider === "fal") {
       const output = await Effect.runPromise(
@@ -243,7 +222,7 @@ export async function perceive(
       }
       raw = await response.json();
     }
-    const result = Schema.decodeUnknownSync(resultSchema)(raw);
+    const result = Schema.decodeUnknownSync(PerceptionResult)(raw);
     if (result.frame_id !== frame.id || result.kind !== input.kind) {
       throw new Error(
         "Perception response does not match source frame or requested capability"
@@ -252,8 +231,6 @@ export async function perceive(
     if (result.width !== frame.width || result.height !== frame.height) {
       throw new Error("Perception image geometry does not match source frame");
     }
-    const path = `${config.dataDir}/perception/${id}`;
-    await mkdir(path, { recursive: true });
     await writeFile(
       `${path}/preview.png`,
       Buffer.from(result.preview_png, "base64")

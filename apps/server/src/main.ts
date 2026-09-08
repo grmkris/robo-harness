@@ -12,6 +12,7 @@ import * as agent from "./chat-runs";
 import { config } from "./config";
 import { decode, isUuid, Uuid } from "./decode";
 import { budget, setBudget, perceptionConfig } from "./perception";
+import { perceptionHistory, perceptionDetail } from "./perception-history";
 import { catalog } from "./providers";
 import {
   inspectRecording,
@@ -497,7 +498,7 @@ async function handle(req: Request): Promise<Response | undefined> {
       }
     }
     if (path.startsWith("/api/recordings/") && path.endsWith("/replay.rrd")) {
-      const id = path.split("/")[3];
+      const id = path.split("/")[3] ?? "";
       if (!isUuid(id)) {
         return json({ error: "Invalid recording" }, 400);
       }
@@ -512,12 +513,31 @@ async function handle(req: Request): Promise<Response | undefined> {
         headers: { "Content-Type": "application/octet-stream" },
       });
     }
+    if (path === "/api/perception") {
+      const before = Number(
+        url.searchParams.get("before") ?? Number.MAX_SAFE_INTEGER
+      );
+      const recordingId = url.searchParams.get("recording_id");
+      if (
+        !Number.isSafeInteger(before) ||
+        before <= 0 ||
+        (recordingId && !isUuid(recordingId))
+      )
+        return json({ error: "Invalid history cursor or recording" }, 400);
+      return json(perceptionHistory(before, recordingId));
+    }
     if (path.startsWith("/api/perception/")) {
-      const id = path.split("/")[3];
+      const id = path.split("/")[3] ?? "";
       if (!isUuid(id)) {
         return json({ error: "Invalid artifact" }, 400);
       }
-      const file = Bun.file(`${config.dataDir}/perception/${id}/preview.png`);
+      const suffix = path.split("/")[4];
+      if (suffix === "detail") return json(perceptionDetail(id));
+      if (suffix && suffix !== "source")
+        return json({ error: "Unknown artifact" }, 404);
+      const file = Bun.file(
+        `${config.dataDir}/perception/${id}/${suffix === "source" ? "source.jpg" : "preview.png"}`
+      );
       return (await file.exists())
         ? new Response(file)
         : json({ error: "Artifact unavailable" }, 404);

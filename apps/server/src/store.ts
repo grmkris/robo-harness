@@ -18,6 +18,9 @@ db.exec(`
 db.run(
   "UPDATE recordings SET state='incomplete',error='Application restarted before finalization' WHERE state='recording'"
 );
+db.run(
+  "UPDATE perception SET state='failed',error='Application restarted before inference completed; reservation retained' WHERE state='running'"
+);
 const listeners = new Set<(event: AppEvent) => void>();
 export function emit(type: string, data: Record<string, unknown>) {
   const time = Date.now();

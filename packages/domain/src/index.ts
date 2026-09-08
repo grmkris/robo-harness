@@ -157,3 +157,10 @@ export {
   RecordingArtifact,
   RecordingDetail,
 } from "./recording";
+
+export {
+  PerceptionResult,
+  PerceptionCheck,
+  PerceptionPage,
+  PerceptionDetail,
+} from "./perception";
