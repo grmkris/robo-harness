@@ -94,6 +94,10 @@ The exporter uses `LeRobotDataset.create`, `add_frame`, `save_episode`, and `fin
 
 Netcup is the primary recording store. The current Pi SSD is not mounted; no disk spool on the Pi is assumed. Camera buffers are bounded and in memory. Disk pressure ends capture explicitly, preserving the root-filesystem reserve.
 
+## Tabletop calibration
+
+Use `uv run robo-calibrate --help` to prepare a saved workspace frame, fit measured plane coordinates, and evaluate held-out points. Each run saves calibration evidence and a camera overlay; it does not enable robot motion. See the [measurement procedure](docs/tabletop-calibration.md).
+
 ## Hardware deployment
 
 The lab runs the systemd units from this `main` working tree (no worktree or branch); config and provider credentials live in `~/.config/robo-harness.env` and data under `ROBO_DATA_DIR`. A promotion is `bun run build` plus `systemctl --user restart robo-app robo-rerun`; see [deployment](docs/real-arm-preflight.md). The deployed rig uses [config/robot.lab-pi.json](config/robot.lab-pi.json); [config/robot.example.json](config/robot.example.json) remains mock-only. Real MCP movement, stop/hold, both cameras, recording/replay, and container observations were verified on 2026-09-06/07. The user confirmed physical readiness and authorized powered movement. See [current deployment](docs/real-arm-preflight.md) and [future commissioning](docs/commissioning.md).

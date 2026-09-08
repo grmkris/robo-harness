@@ -24,3 +24,5 @@ ROBO_PERCEPTION_COST_USD must be a conservative maximum per inference request. T
 The app does not create persistent GPU pods automatically. Operator-provisioned pods remain the operator's responsibility to stop. RunPod serverless jobs can use the same worker contract through a deployment wrapper.
 
 Model inference, licensed checkpoint access, hosted endpoints, and paid billing have not been exercised without configured credentials/GPU hardware. Unit tests can validate contracts without representing synthetic output as model inference.
+
+For a fixed-camera baseline with measured ground truth, use the [offline tabletop calibration workflow](tabletop-calibration.md). It produces image overlays and held-out error reports without running a perception model.

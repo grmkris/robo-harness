@@ -27,6 +27,7 @@ robo-io = "robo_harness.service:main"
 robo-rerun = "robo_harness.telemetry:main"
 robo-perception = "robo_harness.perception:main"
 robo-export = "robo_harness.dataset:main"
+robo-calibrate = "robo_harness.calibration:main"
 
 [build-system]
 requires = ["hatchling"]
