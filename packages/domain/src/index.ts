@@ -144,3 +144,10 @@ export const ProviderInfo = Schema.Struct({
   reason: Schema.optionalKey(Schema.String),
 });
 export type ProviderInfo = typeof ProviderInfo.Type;
+
+export {
+  TerminalSize,
+  TerminalSession,
+  TerminalClientMessage,
+  TerminalServerMessage,
+} from "./terminal";

@@ -8,6 +8,7 @@ export interface DockerShellOptions {
   network: ShellNetwork;
   programUrl: string;
   token: string;
+  terminal?: { lifetimeSeconds: number };
 }
 // Pure so the hardening flags can be asserted without Docker. Host networking
 // would hand agent-authored code the motor service, the Rerun ports and the
@@ -20,6 +21,17 @@ export function dockerArguments(o: DockerShellOptions): string[] {
     "--name",
     `robo-shell-${o.id}`,
     "--interactive",
+    ...(o.terminal
+      ? [
+          "--tty",
+          "--env",
+          "TERM=xterm-256color",
+          "--env",
+          "COLORTERM=truecolor",
+          "--env",
+          "PS1=workspace $ ",
+        ]
+      : []),
     "--init",
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
@@ -43,8 +55,18 @@ export function dockerArguments(o: DockerShellOptions): string[] {
     "--env",
     "PIP_USER=1",
     o.image,
-    "sh",
-    "-s",
+    ...(o.terminal
+      ? [
+          "timeout",
+          "--foreground",
+          "--kill-after=5s",
+          String(o.terminal.lifetimeSeconds),
+          "bash",
+          "--noprofile",
+          "--norc",
+          "-i",
+        ]
+      : ["sh", "-s"]),
   ];
 }
 export function shellNetwork(value?: string): ShellNetwork {

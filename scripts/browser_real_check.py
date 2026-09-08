@@ -4,10 +4,15 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV = {**os.environ, "NODE_OPTIONS": "--import=" + str(ROOT / "scripts/expect-local.mjs")}
+ENV = {
+    **os.environ,
+    "ROBO_EXPECT_SESSION": "/tmp/robo-harness-expect-session.json",
+    "NODE_OPTIONS": "--import=" + str(ROOT / "scripts/expect-local.mjs"),
+}
 BASE = os.environ.get("ROBO_URL", "http://127.0.0.1:8940")
 
 
@@ -44,6 +49,30 @@ return {backend:s.observation.backend,cameras:s.observation.cameras,telemetry:s.
 """,
     "real workbench opens without login and shows healthy telemetry",
 )
+if os.environ.get("ROBO_REAL_TERMINAL_ONLY") == "1":
+    browser(
+        r"""
+const before=await page.evaluate(async()=>(await(await fetch('/api/status')).json()).observation);
+await page.getByRole('button',{name:'terminal',exact:true}).click();
+await page.getByRole('button',{name:'Open terminal',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('.terminal-toolbar')?.textContent?.includes('Connected'),null,{timeout:20000});
+await page.getByLabel('Interactive terminal input').pressSequentially(`python -c "import os; from robo_client import Robot; o=Robot().observe(); print('LIVE_TTY',os.isatty(0),o['backend'],o['fault'])"`,{delay:1});
+await page.getByLabel('Interactive terminal input').press('Enter');
+await page.waitForFunction(()=>document.querySelector('[aria-label="Terminal output"]')?.textContent?.includes('LIVE_TTY True so101 None'),null,{timeout:20000});
+await page.getByRole('button',{name:'Close terminal',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('.terminal-toolbar')?.textContent?.includes('Terminal closed'),null,{timeout:10000});
+const after=await page.evaluate(async()=>(await(await fetch('/api/status')).json()).observation);
+if(after.operator||after.fault||JSON.stringify(before.commanded)!==JSON.stringify(after.commanded))throw new Error('Read-only terminal check changed robot control');
+if(await page.locator('.terminal-error').count())throw new Error('Terminal reported an error');
+""",
+        "deployed interactive Python TTY observes the real arm without acquiring control",
+    )
+    result = subprocess.run(["expect-cli", "screenshot", "--full-page"], env=ENV, capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    print(result.stdout.strip(), flush=True)
+    sys.exit(0)
+
 browser(
     r"""
 await page.getByRole('button',{name:'recordings',exact:true}).click({noWaitAfter:true,timeout:10000});
@@ -60,6 +89,7 @@ browser(
 await page.getByRole('button',{name:'Return to live'}).click({noWaitAfter:true,timeout:10000});
 await page.getByText('Live workspace',{exact:true}).waitFor({timeout:10000});
 await page.getByRole('button',{name:'terminal',exact:true}).click({noWaitAfter:true,timeout:10000});
+await page.getByText('Run a single command',{exact:true}).click();
 await page.getByLabel('Shell command').fill(`python -c "from robo_client import Robot; r=Robot(); o=r.observe(); print(o['backend'], o['fault'], o['measured'])"`);
 await page.getByRole('button',{name:'Run command'}).click({noWaitAfter:true,timeout:10000});
 await page.waitForFunction(()=>document.querySelector('.terminal-output')?.textContent?.includes('"code": 0'),null,{timeout:45000});

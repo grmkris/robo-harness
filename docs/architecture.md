@@ -27,3 +27,7 @@ Observation and frame freshness includes a conservative full HTTP round-trip bou
 ## Chat actions
 
 Chat uses a small capability-gated facade over the low-level protocol. A coordinator action executor owns acquisition, bounded renewal, measured polling, cancellation and cleanup inside one Effect scope. Python boot/epoch guards reject stale acquisitions after stop or takeover, and an additive SQLite ledger prevents automatic replay after uncertain submissions or restart. The motor lease remains three seconds; manual controls and program clients retain the low-level API. See [decision 0004](decisions/0004-supervised-chat-motion.md).
+
+## Interactive development terminal
+
+The workbench lazy-loads Ghostty's WASM terminal emulator and connects to a coordinator-owned Bun PTY over an authenticated WebSocket. That PTY transports `docker run -it`; the shell runs in the same restricted development image and workspace as one-shot commands. Effect scopes own process cleanup, capability revocation and control release. Reconnecting restores a bounded output history and the existing shell; it never resubmits input. See [decision 0006](decisions/0006-interactive-development-terminal.md).

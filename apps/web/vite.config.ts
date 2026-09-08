@@ -12,7 +12,7 @@ export default defineConfig({
     port: 5178,
     strictPort: true,
     proxy: {
-      "/api": target,
+      "/api": { target, ws: true },
       "/rerun": target,
       "/proxy": target,
     },

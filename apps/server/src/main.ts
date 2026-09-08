@@ -1,6 +1,7 @@
 import { resolve, sep } from "node:path";
 
 import { BunRuntime } from "@effect/platform-bun";
+import { TerminalSize } from "@robo/domain";
 import { toolSchemas } from "@robo/protocol";
 import type { ToolName } from "@robo/protocol";
 import { Context, Effect, Layer, Schema } from "effect";
@@ -15,6 +16,8 @@ import { catalog } from "./providers";
 import * as recording from "./recordings";
 import * as robot from "./robot";
 import { db, events, subscribe } from "./store";
+import { terminals } from "./terminal-runtime";
+import { terminalSocket, type TerminalSocketData } from "./terminal-socket";
 import { executeTool } from "./tools";
 import type { Principal } from "./tools";
 
@@ -124,7 +127,7 @@ export function sweep(now = Date.now()) {
   }
   sweepCapabilities(now);
 }
-async function handle(req: Request): Promise<Response> {
+async function handle(req: Request): Promise<Response | undefined> {
   const url = new URL(req.url);
   const path = url.pathname;
   if (!["GET", "HEAD"].includes(req.method)) {
@@ -208,11 +211,63 @@ async function handle(req: Request): Promise<Response> {
     if (!principal) {
       return json({ error: "Unauthorized" }, 401);
     }
+    if (path === "/api/terminal/connect") {
+      requireHuman(principal);
+      const origin = req.headers.get("origin");
+      if (
+        !origin ||
+        (origin !== `http://${config.host}:${server.port}` &&
+          !config.allowedOrigins.has(origin))
+      ) {
+        return json({ error: "Origin mismatch" }, 403);
+      }
+      const ticket = url.searchParams.get("ticket");
+      const id = ticket ? terminals.consumeTicket(ticket) : null;
+      if (!id)
+        return json(
+          { error: "Terminal connection ticket expired or already used" },
+          403
+        );
+      return server.upgrade(req, { data: { id } })
+        ? undefined
+        : json({ error: "WebSocket upgrade required" }, 400);
+    }
+    if (path === "/api/terminals") {
+      requireHuman(principal);
+      if (req.method === "POST") {
+        return json(
+          await terminals.create(
+            principal.owner,
+            decode(TerminalSize, await parse(req))
+          )
+        );
+      }
+      if (req.method === "GET") return json(terminals.list(principal.owner));
+      return json({ error: "Method not allowed" }, 405);
+    }
+    if (path.startsWith("/api/terminals/")) {
+      requireHuman(principal);
+      const [id, action, extra] = path
+        .slice("/api/terminals/".length)
+        .split("/");
+      if (extra !== undefined) return json({ error: "Not found" }, 404);
+      if (!isUuid(id)) return json({ error: "Invalid terminal" }, 400);
+      const terminalId = id ?? "";
+      if (req.method === "POST" && action === "ticket")
+        return json(terminals.ticket(principal.owner, terminalId));
+      if (req.method === "POST" && action === "close") {
+        return json(await terminals.close(principal.owner, terminalId));
+      }
+      if (req.method === "GET" && !action)
+        return json(terminals.info(principal.owner, terminalId));
+      return json({ error: "Not found" }, 404);
+    }
     if (path === "/api/status") {
       return json({ ...(await status()), controller: principal.owner });
     }
     if (path === "/api/logout" && req.method === "POST") {
       await robot.release(principal.owner).catch(() => {});
+      await terminals.closeOwner(principal.owner);
       for (const [key, value] of sessions) {
         if (value.owner === principal.owner) sessions.delete(key);
       }
@@ -464,13 +519,14 @@ async function handle(req: Request): Promise<Response> {
 }
 // Assigned when the App layer acquires the server; handlers read it only at
 // request time, after startup.
-let server: ReturnType<typeof Bun.serve>;
+let server: Bun.Server<TerminalSocketData>;
 const serveOptions = {
   hostname: config.host,
   port: config.port,
   idleTimeout: 60,
   maxRequestBodySize: 65_536,
-  async fetch(req: Request): Promise<Response> {
+  websocket: terminalSocket,
+  async fetch(req: Request): Promise<Response | undefined> {
     try {
       return await handle(req);
     } catch (error) {
@@ -550,6 +606,7 @@ export class App extends Context.Service<App, { readonly port: number }>()(
             agent.cancel(id);
           }
           await robot.stop().catch(() => {});
+          await terminals.closeAll();
           if (recording.active) {
             await recording.stopRecording().catch(() => {});
           }

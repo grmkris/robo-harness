@@ -76,6 +76,10 @@ Build the local development image:
 docker build -f deploy/dev.Dockerfile -t robo-harness-dev:local .
 ```
 
+Open **Terminal → Open terminal** for an interactive Bash shell, Python REPL, terminal applications, Ctrl-C, and automatic resizing. Leaving the tab or briefly losing the connection retains the shell; returning restores its recent output. **Close terminal** ends the container. Files in `/workspace` persist for the same browser controller. Sessions close after ten minutes without input or one hour total; coordinator restart also closes them. **Run a single command** retains the existing Netcup/Pi command runner.
+
+The interactive terminal uses `Bun.Terminal` on the coordinator and `ghostty-web` (Ghostty's WASM parser) in the browser, following the same transport/rendering pattern as Invok without importing it. Interactive terminals always use bridge networking.
+
 The terminal and agent shell run in a container with only their task workspace mounted. They receive a short-lived program credential, no provider or hardware-service credentials, no Docker socket, and no motor devices. The container runs on Docker's bridge network and reaches the authenticated API through `ROBO_PROGRAM_URL`, which defaults to the tailnet bind address; `ROBO_SHELL_NETWORK=host` is a development-only escape hatch for a loopback-bound server with mock hardware. CPU, memory, process count, output size, and command duration are bounded. Python programs import `Robot` from `robo_client` in this image.
 
 Optional Pi development uses an explicitly configured dedicated SSH account and `deploy/robo-dev-shell`. That account must have no sudo, no device groups, no production secret access, and no write access to the deployed service or reviewed profile. Dependency installation belongs in its own virtual environment. Provisioning this account is a separate reviewed deployment step.

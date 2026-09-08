@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@robo/domain": "workspace:*",
+    "effect": "4.0.0-rc.112",
+    "ghostty-web": "0.4.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

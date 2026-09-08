@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("ROBO_BROWSER_URL", "http://127.0.0.1:5178")
 EXPECT_ENV = {
     **os.environ,
+    "ROBO_EXPECT_SESSION": "/tmp/robo-harness-expect-session.json",
     "NODE_OPTIONS": (
         os.environ.get("NODE_OPTIONS", "") + " --import=" + str(ROOT / "scripts/expect-local.mjs")
     ).strip(),
@@ -57,6 +58,70 @@ browser(
     + "if(await page.getByLabel('Operator token').count())throw new Error('Unexpected login prompt');",
     "workbench opens without a token",
 )
+if os.environ.get("ROBO_BROWSER_TERMINAL_ONLY") == "1":
+    browser(
+        r"""
+await page.getByRole('button',{name:'terminal',exact:true}).click();
+await page.evaluate(async()=>{
+ const headers={'X-Robo-Browser':sessionStorage.getItem('robo-controller'),'Content-Type':'application/json'};
+ const sessions=await(await fetch('/api/terminals',{headers})).json();
+ for(const session of sessions)if(session.status!=='exited')await fetch(`/api/terminals/${session.id}/close`,{method:'POST',headers,body:'{}'});
+});
+await page.getByRole('button',{name:'Open terminal',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('.terminal-toolbar')?.textContent?.includes('Connected'),null,{timeout:20000});
+await page.getByLabel('Interactive terminal input').pressSequentially(`python -c "import os; print('TTY_OK', os.isatty(0))"`,{delay:1});
+await page.getByLabel('Interactive terminal input').press('Enter');
+await page.waitForFunction(()=>document.querySelector('[aria-label="Terminal output"]')?.textContent?.includes('TTY_OK True'));
+await page.getByLabel('Interactive terminal input').pressSequentially('export WORKSPACE_CHECK=still_here');
+await page.getByLabel('Interactive terminal input').press('Enter');
+await page.getByLabel('Interactive terminal input').pressSequentially('python -q');
+await page.getByLabel('Interactive terminal input').press('Enter');
+await page.waitForFunction(()=>document.querySelector('[aria-label="Terminal output"]')?.textContent?.includes('>>>'));
+await page.getByLabel('Interactive terminal input').pressSequentially("print('REPL_RESULT',6*7); open('.terminal-acceptance','w').write('workspace-kept')");
+await page.getByLabel('Interactive terminal input').press('Enter');
+await page.waitForFunction(()=>document.querySelector('[aria-label="Terminal output"]')?.textContent?.includes('REPL_RESULT 42'));
+await page.getByLabel('Interactive terminal input').pressSequentially('import time; time.sleep(30)');
+await page.getByLabel('Interactive terminal input').press('Enter');
+await page.getByRole('button',{name:'Ctrl-C',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('[aria-label="Terminal output"]')?.textContent?.includes('KeyboardInterrupt'));
+await page.getByLabel('Interactive terminal input').pressSequentially('exit()');
+await page.getByLabel('Interactive terminal input').press('Enter');
+""",
+        "interactive Docker TTY, Python REPL, and Ctrl-C",
+    )
+    browser(
+        r"""
+const before=await page.evaluate(async()=> (await(await fetch('/api/terminals',{headers:{'X-Robo-Browser':sessionStorage.getItem('robo-controller')}})).json())[0]);
+await page.getByRole('button',{name:'chat',exact:true}).click();
+await page.getByRole('button',{name:'terminal',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('.terminal-toolbar')?.textContent?.includes('Connected'),null,{timeout:10000});
+await page.getByLabel('Interactive terminal input').pressSequentially(`printf 'RESTORED:%s\n' "$WORKSPACE_CHECK"`);
+await page.getByLabel('Interactive terminal input').press('Enter');
+await page.waitForFunction(()=>document.querySelector('[aria-label="Terminal output"]')?.textContent?.includes('RESTORED:still_here'));
+const after=await page.evaluate(async()=> (await(await fetch('/api/terminals',{headers:{'X-Robo-Browser':sessionStorage.getItem('robo-controller')}})).json())[0]);
+if(after.id!==before.id)throw new Error('Reconnect created a new shell');
+await page.setViewportSize({width:390,height:844});
+await page.waitForFunction(async cols=>(await(await fetch('/api/terminals',{headers:{'X-Robo-Browser':sessionStorage.getItem('robo-controller')}})).json())[0].cols<cols,before.cols,{timeout:10000});
+if(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+2))throw new Error('Terminal overflows mobile viewport');
+await page.setViewportSize({width:1440,height:1100});
+await page.getByRole('button',{name:'Close terminal',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('.terminal-toolbar')?.textContent?.includes('Terminal closed'),null,{timeout:10000});
+const closed=await page.evaluate(async()=> (await(await fetch('/api/terminals',{headers:{'X-Robo-Browser':sessionStorage.getItem('robo-controller')}})).json())[0]);
+if(closed.status!=='exited')throw new Error('Terminal did not exit');
+await page.getByText('Run a single command',{exact:true}).click();
+await page.getByLabel('Shell command').fill(`python -c "print('BATCH_OK',open('.terminal-acceptance').read())"`);
+await page.getByRole('button',{name:'Run command'}).click();
+await page.waitForFunction(()=>document.querySelector('.terminal-output')?.textContent?.includes('BATCH_OK workspace-kept'),null,{timeout:30000});
+""",
+        "terminal reconnect, mobile resize, cleanup, and shared files in the single-command runner",
+    )
+    result = subprocess.run(
+        ["expect-cli", "screenshot", "--full-page"], capture_output=True, text=True, timeout=60, env=EXPECT_ENV
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    print(result.stdout.strip())
+    sys.exit(0)
 if os.environ.get("ROBO_BROWSER_CHAT_ONLY") == "1":
     browser(
         r"""
@@ -138,6 +203,7 @@ await page.getByText('Live workspace',{exact:true}).waitFor({timeout:10000});
 browser(
     r"""
 await page.getByRole('button',{name:'terminal',exact:true}).click({noWaitAfter:true,timeout:10000});
+await page.getByText('Run a single command',{exact:true}).click();
 await page.getByLabel('Shell command').fill(`python -c "from robo_client import Robot; r=Robot(); print(r.observe()['backend'])"`);
 await page.getByRole('button',{name:'Run command'}).click({noWaitAfter:true,timeout:10000});
 await page.waitForFunction(()=>document.querySelector('.terminal-output')?.textContent?.includes('"code": 0'),null,{timeout:45000});

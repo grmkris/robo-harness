@@ -1079,3 +1079,93 @@ h2 {
   border-left: 2px solid var(--accent, #2d7564);
   padding-left: 0.85rem;
 }
+
+.interactive-terminal {
+  margin-top: 20px;
+  border: 1px solid #384736;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #1a231e;
+}
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: #222e26;
+  color: #c5d7b9;
+  font: 10px/1.5 var(--mono);
+}
+.terminal-toolbar > output {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.terminal-toolbar > div {
+  display: flex;
+  gap: 6px;
+}
+.terminal-toolbar button {
+  border-color: #506149;
+  font-size: 10px;
+  padding: 5px 8px;
+}
+.terminal-toolbar button:hover:not(:disabled) {
+  background: #384736;
+  color: #f8f8f3;
+}
+.terminal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8e9789;
+}
+.terminal-dot.live {
+  background: #b0cf83;
+  box-shadow: 0 0 0 3px #b0cf831c;
+}
+.terminal-screen {
+  width: 100%;
+  height: 360px;
+  min-width: 0;
+  padding: 10px;
+  overflow: hidden;
+}
+.terminal-footnote {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  color: #a7b49c;
+  border-top: 1px solid #384736;
+  font: 9px/1.6 var(--mono);
+}
+.terminal-error {
+  color: #e2a68e;
+  padding: 0 12px 10px;
+  font-size: 12px;
+}
+.batch-command {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+}
+.batch-command > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
