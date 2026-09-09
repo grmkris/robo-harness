@@ -25,7 +25,7 @@ export function TopBar({
       </h1>
       <div className="top-status">
         <span className={`led ${fresh ? "good" : "bad"}`} />
-        {fresh ? "Connected" : "Unavailable"}
+        {obs?.fault ? "Control stopped" : fresh ? "Connected" : "Unavailable"}
         <span className="backend">
           {obs?.backend === "mock" ? "Mock" : "SO-101"}
         </span>

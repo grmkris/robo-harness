@@ -38,9 +38,11 @@ export function ControlDeck({
         <div className="panel-heading">
           <strong>
             <MoveIcon />{" "}
-            {obs?.operator
-              ? `${label(obs.operator.mode)} control`
-              : "Holding position"}
+            {obs?.fault
+              ? "Movement stopped"
+              : obs?.operator
+                ? `${label(obs.operator.mode)} control`
+                : "Holding position"}
           </strong>
         </div>
         <div className="toolbar">

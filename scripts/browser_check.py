@@ -58,6 +58,46 @@ browser(
     + "if(await page.getByLabel('Operator token').count())throw new Error('Unexpected login prompt');",
     "workbench opens without a token",
 )
+if os.environ.get("ROBO_BROWSER_CONTROL_ONLY") == "1":
+    browser(
+        r"""
+await page.getByRole('button',{name:'Take manual control',exact:true}).click();
+await page.getByText('human control',{exact:true}).waitFor();
+await page.waitForTimeout(3500);
+const status=await page.evaluate(async()=> (await(await fetch('/api/status',{headers:{'X-Robo-Browser':sessionStorage.getItem('robo-controller')}})).json()));
+if(status.observation.operator?.mode!=='human'||status.observation.operator?.owner!==status.controller)throw new Error('Manual control was not renewed');
+await page.getByRole('button',{name:'Release',exact:true}).click();
+await page.getByText('Holding position',{exact:true}).waitFor();
+""",
+        "manual control acquires, renews and releases without movement",
+    )
+    browser(
+        r"""
+await page.route('**/api/status',async route=>{
+ const response=await route.fetch();const status=await response.json();
+ status.observation.fault='ValueError: Arm geometry intersects the configured table clearance';
+ await route.fulfill({response,json:status});
+});
+await page.reload({waitUntil:'domcontentloaded'});
+const fault=page.getByRole('alert',{name:'Robot fault',exact:true});
+await fault.getByText('ValueError: Arm geometry intersects the configured table clearance',{exact:true}).waitFor();
+await page.getByText('Control stopped',{exact:false}).waitFor();
+for(const name of ['Take manual control','Use leader arm'])if(!(await page.getByRole('button',{name,exact:true}).isDisabled()))throw new Error(name+' enabled with fault');
+if(await page.getByText('Holding position',{exact:true}).count())throw new Error('Fault misrepresented as holding position');
+await page.getByRole('button',{name:'STOP / HOLD'}).click();
+await fault.waitFor();
+if(await fault.getByRole('button',{name:'Dismiss error'}).count())throw new Error('Live fault can be dismissed');
+await page.setViewportSize({width:390,height:844});
+if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2))throw new Error('Fault banner overflows mobile');
+await page.getByRole('button',{name:'STOP / HOLD'}).waitFor({state:'visible'});
+""",
+        "live fault explains disabled controls, persists after Stop, and fits mobile",
+    )
+    result = subprocess.run(["expect-cli", "screenshot", "--full-page"], capture_output=True, text=True, timeout=60, env=EXPECT_ENV)
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    print(result.stdout.strip())
+    sys.exit(0)
 if os.environ.get("ROBO_BROWSER_PERCEPTION_ONLY") == "1":
     browser(
         r"""

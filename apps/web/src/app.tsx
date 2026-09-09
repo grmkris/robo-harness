@@ -188,6 +188,20 @@ export function App() {
         onLogout={() => setLogged(false)}
         halt={halt}
       />
+      {obs?.fault ? (
+        <div
+          className="error-banner fault-banner"
+          role="alert"
+          aria-label="Robot fault"
+        >
+          <strong>Movement stopped</strong>
+          <span>{obs.fault}</span>
+          <small>
+            Manual and leader control are disabled. Inspect the arm and resolve
+            the fault before restarting the motor service.
+          </small>
+        </div>
+      ) : null}
       {error ? (
         <div className="error-banner" role="alert">
           <span>{error}</span>
