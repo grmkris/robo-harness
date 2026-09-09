@@ -256,6 +256,8 @@ for(let i=0;i<await images.count();i++)await images.nth(i).scrollIntoViewIfNeede
 await page.waitForFunction(()=>[...document.querySelectorAll('.chat-capture img')].every(img=>img.complete&&img.naturalWidth>0));
 const urls=await images.evaluateAll(imgs=>imgs.map(img=>img.getAttribute('src')));
 if(new Set(urls).size!==4)throw new Error('Before and after captures must be distinct artifacts');
+const order=await page.locator('.chat-event').evaluateAll(events=>({explanation:events.findIndex(e=>e.textContent.includes('Inspecting both cameras before moving.')),tool:events.findIndex(e=>e.classList.contains('chat-tool'))}));
+if(order.explanation<0||order.explanation>=order.tool)throw new Error('Assistant explanation must precede its tool call');
 await page.locator('.motion-progress summary').click();
 await page.locator('.motion-progress table').waitFor();
 if(!(await page.locator('.motion-progress table').innerText()).includes('42.00'))throw new Error('Measured joint table missing');
@@ -291,6 +293,15 @@ await page.evaluate(()=>{
 });
 await page.waitForFunction(()=>document.querySelector('.chat-log')?.textContent?.includes('ReplayProbe'));
 if(((await page.locator('.chat-log').innerText()).match(/ReplayProbe/g)||[]).length!==1)throw new Error('Replay duplicated the streaming draft');
+const captureCount=await page.locator('.chat-capture').count();
+await page.evaluate(()=>{
+ const source=window.__roboTestSource;
+ for(let i=0;i<300;i++){
+  const id=source.__lastId+1;
+  source.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({id,time:Date.now(),type:'chat.delta',data:{session_id:sessionStorage.getItem('robo-conversation'),text:''}}),lastEventId:String(id)}));
+ }
+});
+if(await page.locator('.chat-capture').count()!==captureCount)throw new Error('Streamed deltas evicted captured images');
 await page.evaluate(()=>{
  const source=window.__roboTestSource;
  source.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({id:source.__lastId+1,time:Date.now(),type:'chat.finished',data:{session_id:sessionStorage.getItem('robo-conversation')}})}));

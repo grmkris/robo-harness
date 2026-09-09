@@ -297,6 +297,7 @@ function startFixture(
         ? done
           ? { content: scripted?.text ?? "Reported the measured outcome." }
           : {
+              ...(scripted?.text ? { content: scripted.text } : {}),
               tool_calls: scripted?.calls?.map((call, index) => ({
                 index,
                 id: call.id ?? `fixture-${requests.length}-${index}`,

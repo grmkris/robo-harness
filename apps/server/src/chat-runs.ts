@@ -215,6 +215,15 @@ export async function startChat(
         onPersist: persist,
       });
       let assistant = "";
+      const flushAssistant = () => {
+        if (!assistant) return;
+        emit("chat.message", {
+          session_id: sessionId,
+          role: "assistant",
+          text: assistant,
+        });
+        assistant = "";
+      };
       await Effect.runPromise(
         Stream.runForEach(stream, (part) =>
           Effect.sync(() => {
@@ -235,6 +244,7 @@ export async function startChat(
                 message: "Waiting for model…",
               });
             } else if (part.type === "tool-call") {
+              flushAssistant();
               toolCalls += 1;
               firstCallId ??= part.toolCallId;
               callStarted.set(part.toolCallId, performance.now());
@@ -283,14 +293,7 @@ export async function startChat(
                 ...failure,
               });
             } else if (part.type === "finish-step") {
-              if (assistant) {
-                emit("chat.message", {
-                  session_id: sessionId,
-                  role: "assistant",
-                  text: assistant,
-                });
-              }
-              assistant = "";
+              flushAssistant();
             }
           })
         ).pipe(

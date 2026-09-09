@@ -426,3 +426,34 @@ test("text-only models still save captures for the operator without receiving im
     await h.close();
   }
 }, 15_000);
+
+test("assistant explanations precede their tool call and result without duplication", async () => {
+  const h = await startHarness({
+    modelSteps: [
+      {
+        text: "I will capture the workspace now.",
+        calls: [{ name: "capture", input: { camera: "workspace" } }],
+      },
+      { text: "The capture is visible." },
+    ],
+  });
+  try {
+    const result = await transcript(h, await start(h));
+    const events = result.events.filter(
+      (event) =>
+        event.type === "chat.tool" ||
+        event.type === "chat.tool_result" ||
+        (event.type === "chat.message" && event.data["role"] === "assistant")
+    );
+    expect(events.map((event) => event.type)).toEqual([
+      "chat.message",
+      "chat.tool",
+      "chat.tool_result",
+      "chat.message",
+    ]);
+    expect(events[0]?.data["text"]).toBe("I will capture the workspace now.");
+    expect(events[3]?.data["text"]).toBe("The capture is visible.");
+  } finally {
+    await h.close();
+  }
+}, 15_000);
