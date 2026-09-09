@@ -14,6 +14,7 @@ import { trimContext } from "./chat-context";
 import { closePendingCalls } from "./chat-history";
 import {
   scopedChatStream,
+  ChatRunError,
   type ChatAdapter,
   type ChatEvent,
 } from "./chat-stream";
@@ -138,7 +139,14 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
     (controller) => ({
       async *[Symbol.asyncIterator](): AsyncGenerator<ChatEvent> {
         const stepCap = opts.stepCap ?? STEP_CAP;
-        const adapter = stallWatchdog(opts.model, opts.stall ?? STREAM_STALL);
+        let providerFailure: ChatRunError | undefined;
+        const adapter = stallWatchdog(
+          opts.model,
+          opts.stall ?? STREAM_STALL,
+          (error) => {
+            providerFailure = error;
+          }
+        );
         let transcript = [...opts.history];
         const completedSteps: StepLike[] = [];
         let totalSteps = 0;
@@ -268,6 +276,8 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
             }
           },
           onChunk: (_ctx, chunk) => {
+            if (chunk.type === EventType.REASONING_START)
+              queue.push({ type: "model-status", status: "thinking" });
             if (chunk.type === EventType.TEXT_MESSAGE_CONTENT)
               queue.push({ type: "text-delta", text: chunk.delta });
             if (chunk.type === "TOOL_CALL_START")
@@ -290,7 +300,13 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
                 });
             }
             if (chunk.type === EventType.RUN_ERROR)
-              throw new Error("Provider stream failed");
+              throw (
+                providerFailure ??
+                new ChatRunError({
+                  code: "PROVIDER_ERROR",
+                  cause: new Error("Provider stream failed"),
+                })
+              );
           },
           onToolPhaseComplete: (_ctx, info) => {
             const content: { type: string; error?: unknown }[] = [];

@@ -1,6 +1,16 @@
 import type { TextOptions } from "@tanstack/ai";
 import { OpenAICompatibleChatAdapter } from "@tanstack/ai-openai/compatible";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
+
+const ReasoningChunk = Schema.Struct({
+  choices: Schema.Array(
+    Schema.Struct({
+      delta: Schema.Struct({
+        reasoning_content: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      }),
+    })
+  ),
+});
 
 /** TanStack 0.53's compatible adapter widens optional fields to required/null
  * automatically. The robot contract requires omitted-or-number, never null.
@@ -12,6 +22,19 @@ export class RobotChatAdapter extends OpenAICompatibleChatAdapter<
   readonly ["text", "image"],
   readonly []
 > {
+  /** Qwen streams reasoning_content before text/tool deltas. Forward its
+   * lifecycle so the provider watchdog sees activity while it thinks. */
+  protected override extractReasoning(
+    chunk: unknown
+  ): { text: string } | undefined {
+    if (this.name !== "alibaba") return super.extractReasoning(chunk);
+    const decoded = Schema.decodeUnknownOption(ReasoningChunk)(chunk);
+    const text = Option.isSome(decoded)
+      ? decoded.value.choices[0]?.delta.reasoning_content
+      : undefined;
+    return text ? { text } : undefined;
+  }
+
   protected override mapOptionsToRequest(
     options: TextOptions<Record<string, unknown>>
   ) {

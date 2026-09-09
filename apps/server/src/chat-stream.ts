@@ -15,6 +15,7 @@ export type ChatAdapter = TextAdapter<
 export type ChatEvent =
   | { type: "start-step" | "finish-step" }
   | { type: "text-delta"; text: string }
+  | { type: "model-status"; status: "thinking" }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | {
       type: "tool-result";
@@ -32,6 +33,7 @@ export type ChatEvent =
 export class ChatRunError extends Schema.TaggedError<ChatRunError>()(
   "ChatRunError",
   {
+    code: Schema.Literals(["PROVIDER_TIMEOUT", "PROVIDER_ERROR"]),
     cause: Schema.Defect(),
   }
 ) {}
@@ -65,7 +67,10 @@ export const scopedChatStream = <A>(
         return Effect.suspend(() => {
           const next = Effect.tryPromise({
             try: () => resource.iterator.next(),
-            catch: (cause) => new ChatRunError({ cause }),
+            catch: (cause) =>
+              cause instanceof ChatRunError
+                ? cause
+                : new ChatRunError({ code: "PROVIDER_ERROR", cause }),
           });
           const bounded = timeoutMs
             ? next.pipe(
@@ -76,6 +81,7 @@ export const scopedChatStream = <A>(
                       Effect.andThen(
                         Effect.fail(
                           new ChatRunError({
+                            code: "PROVIDER_TIMEOUT",
                             cause: new Error("Provider stream stalled"),
                           })
                         )

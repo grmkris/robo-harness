@@ -1,7 +1,7 @@
 import { EventType } from "@tanstack/ai";
 import { Effect, Stream } from "effect";
 
-import type { ChatAdapter } from "./chat-stream";
+import type { ChatAdapter, ChatRunError } from "./chat-stream";
 import { scopedChatStream } from "./chat-stream";
 
 export interface StallLimits {
@@ -13,7 +13,8 @@ export interface StallLimits {
  * deadlines; a legitimate measured-motion wait is never a provider stall. */
 export const stallWatchdog = (
   adapter: ChatAdapter,
-  limits: StallLimits
+  limits: StallLimits,
+  onFailure?: (error: ChatRunError) => void
 ): ChatAdapter => ({
   kind: adapter.kind,
   name: adapter.name,
@@ -42,6 +43,7 @@ export const stallWatchdog = (
           ? limits.chunkMs
           : Math.max(1, firstDeadline - performance.now())
     ).pipe(
+      Stream.tapError((error) => Effect.sync(() => onFailure?.(error))),
       Stream.tap((chunk) =>
         Effect.sync(() => {
           if (chunk.type !== EventType.RUN_STARTED) started = true;

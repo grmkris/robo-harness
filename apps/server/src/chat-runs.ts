@@ -164,6 +164,7 @@ export async function startChat(
   let completedActions = 0;
   let firstCallId: string | undefined;
   let firstInputValid = true;
+  let failureCode = "PROVIDER_ERROR";
   void (async () => {
     try {
       const pendingImages: Frame[] = [];
@@ -215,8 +216,19 @@ export async function startChat(
             if (part.type === "text-delta") {
               assistant += part.text;
               emit("chat.delta", { session_id: sessionId, text: part.text });
+            } else if (part.type === "model-status") {
+              emit("chat.status", {
+                session_id: sessionId,
+                status: part.status,
+                message: "Thinking…",
+              });
             } else if (part.type === "start-step") {
               stepNumber += 1;
+              emit("chat.status", {
+                session_id: sessionId,
+                status: "waiting",
+                message: "Waiting for model…",
+              });
             } else if (part.type === "tool-call") {
               toolCalls += 1;
               firstCallId ??= part.toolCallId;
@@ -276,6 +288,12 @@ export async function startChat(
               assistant = "";
             }
           })
+        ).pipe(
+          Effect.tapError((error) =>
+            Effect.sync(() => {
+              failureCode = error.code;
+            })
+          )
         )
       );
     } catch {
@@ -283,9 +301,12 @@ export async function startChat(
       // event log.
       emit("chat.error", {
         session_id: sessionId,
+        code: signal.aborted ? "CANCELLED" : failureCode,
         message: signal.aborted
           ? describeToolError(signal.reason).message
-          : "Agent request failed. Check provider availability and model capabilities.",
+          : failureCode === "PROVIDER_TIMEOUT"
+            ? "Model timed out after 90 seconds without streamed activity. The turn ended; review any motion result before continuing."
+            : "Model request failed. The turn ended; review any motion result before continuing.",
       });
     } finally {
       await release(owner).catch(() => {});

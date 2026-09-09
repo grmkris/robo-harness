@@ -8,9 +8,11 @@ import {
   type Tool,
 } from "@tanstack/ai";
 import { Effect, Schema, Stream } from "effect";
+import OpenAI from "openai";
 
 import type { ChatAdapter, ChatEvent } from "./chat-stream";
 import { runChatLoop } from "./loop";
+import { RobotChatAdapter } from "./provider-adapter";
 import { DOOM_LOOP_STOP } from "./stop-conditions";
 
 type RequestOptions = Parameters<ChatAdapter["chatStream"]>[0];
@@ -274,10 +276,14 @@ test("provider stall before headers and mid-stream abort the request and finaliz
         closed = true;
       }
     };
-    const result = await drain(
-      base(model, { stall: { firstChunkMs: 20, chunkMs: 20 } })
-    ).catch(() => "stalled");
-    expect(result).toBe("stalled");
+    const result = await Effect.runPromise(
+      Stream.runCollect(
+        base(model, { stall: { firstChunkMs: 20, chunkMs: 20 } })
+      ).pipe(
+        Effect.catchTag("ChatRunError", (error) => Effect.succeed(error.code))
+      )
+    );
+    expect(result).toBe("PROVIDER_TIMEOUT");
     expect(aborted).toBe(true);
     expect(closed).toBe(true);
   }
@@ -413,4 +419,57 @@ test("steering during generation skips the stale tool and replans", async () => 
     "pick up the white piece"
   );
   expect(JSON.stringify(events)).toContain("OPERATOR_STEERED");
+});
+
+test("Qwen reasoning-only chunks keep the stream alive until text arrives", async () => {
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch() {
+      const encoder = new TextEncoder();
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const send = (
+              delta: Record<string, unknown>,
+              finish_reason: string | null = null
+            ) =>
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ id: "reasoning", object: "chat.completion.chunk", created: 0, model: "fixture", choices: [{ index: 0, delta, finish_reason }] })}\n\n`
+                )
+              );
+            for (let i = 0; i < 8; i += 1) {
+              send({ reasoning_content: "private fixture reasoning" });
+              await Bun.sleep(40);
+            }
+            send({ content: "Visible answer." });
+            send({}, "stop");
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } }
+      );
+    },
+  });
+  try {
+    const client = new OpenAI({
+      apiKey: "fixture-not-a-secret",
+      baseURL: `http://127.0.0.1:${server.port}`,
+      maxRetries: 0,
+    });
+    const model = new RobotChatAdapter(client, "fixture", "alibaba");
+    const events = await drain(
+      base(model, { stall: { firstChunkMs: 150, chunkMs: 150 } })
+    );
+    expect(events).toContainEqual({ type: "model-status", status: "thinking" });
+    expect(events).toContainEqual({
+      type: "text-delta",
+      text: "Visible answer.",
+    });
+    expect(JSON.stringify(events)).not.toContain("private fixture reasoning");
+  } finally {
+    await server.stop(true);
+  }
 });
