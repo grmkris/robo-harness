@@ -1,9 +1,15 @@
 import type { AppEvent } from "@robo/domain";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 
 import { api, time } from "../lib/client";
 import type { Status } from "../lib/types";
-import { MoveIcon } from "./icons";
+import { ChatMotionEntry, ChatToolEntry } from "./chat-entry";
 
 export interface ModelOption {
   model: string;
@@ -53,6 +59,14 @@ export function ChatTab({
   setError: Dispatch<SetStateAction<string>>;
   chatEndRef: RefObject<HTMLDivElement | null>;
 }) {
+  const follow = useRef(true);
+  useEffect(() => {
+    follow.current = true;
+  }, [session]);
+  useEffect(() => {
+    if (follow.current)
+      chatEndRef.current?.scrollIntoView({ block: "nearest" });
+  }, [chatEvents.length, draft, chatEndRef]);
   const selectedModel = modelOptions.find(
     (option) => option.provider === provider && option.model === model
   );
@@ -61,11 +75,28 @@ export function ChatTab({
     if (event.type === "chat.motion")
       latestMotion.set(String(event.data["action_id"]), event.id);
   }
-  const visibleEvents = chatEvents.filter(
-    (event) =>
-      event.type !== "chat.motion" ||
-      latestMotion.get(String(event.data["action_id"])) === event.id
-  );
+  const results = new Map<string, AppEvent>();
+  const calls = new Set<string>();
+  for (const event of chatEvents) {
+    const id = String(event.data["tool_call_id"] ?? "");
+    if (!id) continue;
+    if (event.type === "chat.tool") calls.add(id);
+    if (["chat.tool_result", "chat.tool_error"].includes(event.type))
+      results.set(id, event);
+  }
+  const visibleEvents = chatEvents.filter((event) => {
+    if (event.type === "chat.status") return false;
+    if (event.type === "chat.motion")
+      return latestMotion.get(String(event.data["action_id"])) === event.id;
+    if (["chat.tool_result", "chat.tool_error"].includes(event.type))
+      return !calls.has(String(event.data["tool_call_id"] ?? ""));
+    return true;
+  });
+  const latest = chatEvents.at(-1);
+  const runStatus =
+    latest?.type === "chat.status"
+      ? String(latest.data["message"])
+      : "Working…";
   const resetConversation = () => {
     setSession(undefined);
     setDraft("");
@@ -91,11 +122,25 @@ export function ChatTab({
               key={`${o.provider}:${o.model}`}
               value={`${o.provider}:${o.model}`}
             >
-              {o.model} ({o.providerName})
+              {o.model}
             </option>
           ))}
         </select>
+        {selectedModel ? (
+          <span
+            className="model-capability"
+            aria-label="Model image capability"
+            title={
+              selectedModel.vision
+                ? "Camera images enabled"
+                : "Camera images unavailable"
+            }
+          >
+            {selectedModel.vision ? "Images" : "Text only"}
+          </span>
+        ) : null}
         <button
+          type="button"
           className="quiet"
           disabled={running}
           onClick={resetConversation}
@@ -103,17 +148,6 @@ export function ChatTab({
           New
         </button>
       </div>
-      {selectedModel ? (
-        <p
-          className={`model-capability ${selectedModel.vision ? "vision-enabled" : ""}`}
-          aria-label="Model image capability"
-        >
-          <span aria-hidden="true">{selectedModel.vision ? "◉" : "○"}</span>
-          {selectedModel.vision
-            ? "Camera images enabled"
-            : "Text only · camera images unavailable"}
-        </p>
-      ) : null}
       <div className="conversation-row">
         <select
           aria-label="Conversation"
@@ -133,76 +167,73 @@ export function ChatTab({
           ))}
         </select>
       </div>
-      <div className="chat-log" aria-live="polite">
+      <div
+        className="chat-log"
+        aria-live="polite"
+        onScroll={(event) => {
+          const log = event.currentTarget;
+          follow.current =
+            log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+        }}
+      >
         {chatEvents.length === 0 && !pendingUser ? (
           <div className="chat-empty">
-            <div className="orb">
-              <MoveIcon />
-            </div>
-            <p className="eyebrow">YOUR LAB PARTNER</p>
-            <h2>
-              What can we
-              <br />
-              make it do?
-            </h2>
             <p>
-              Ask the agent to look around, inspect a joint, or try a small
-              movement.
+              Send an instruction, or inspect the current state and cameras.
             </p>
             <button
+              type="button"
               className="suggestion"
               onClick={() =>
                 setMessage(
-                  "Inspect the robot state and describe what you can observe. Do not move yet."
+                  "Observe the robot and capture both workspace and wrist cameras. Briefly describe what you see. Do not move."
                 )
               }
             >
-              Inspect the workspace <span>↗</span>
+              Observe + capture
             </button>
           </div>
         ) : null}
-        {visibleEvents.map((e) => (
-          <article
-            className={`chat-event ${e.data["role"] === "user" ? "user" : ""} ${e.type === "chat.motion" ? "motion-progress" : ""}`}
-            key={e.id}
-          >
-            <small>
-              {e.type === "chat.message"
-                ? e.data["role"] === "user"
-                  ? "YOU"
-                  : "AGENT"
-                : e.type
-                    .replace("chat.", "")
-                    .replaceAll("_", " ")
-                    .toUpperCase()}{" "}
-              <time>{time(e.time)}</time>
-            </small>
-            {e.type === "chat.message" ? (
-              <p>{String(e.data["text"])}</p>
-            ) : e.type === "chat.tool" ? (
-              <details>
-                <summary>{String(e.data["name"])}</summary>
-                <pre>{JSON.stringify(e.data["input"], null, 2)}</pre>
-              </details>
-            ) : e.type === "chat.tool_result" ? (
-              <details>
-                <summary>{String(e.data["name"])} · result</summary>
-                <pre>{JSON.stringify(e.data["output"], null, 2)}</pre>
-              </details>
-            ) : e.type === "chat.tool_error" ? (
-              <p>
-                <strong>{String(e.data["name"])}: </strong>
-                {String(e.data["message"])}
-              </p>
-            ) : (
-              <p>{String(e.data["message"] ?? e.data["text"] ?? "")}</p>
-            )}
-          </article>
-        ))}
+        {visibleEvents.map((e) =>
+          ["chat.tool", "chat.tool_result", "chat.tool_error"].includes(
+            e.type
+          ) ? (
+            <ChatToolEntry
+              key={e.id}
+              running={running}
+              event={e}
+              result={results.get(String(e.data["tool_call_id"] ?? ""))}
+            />
+          ) : e.type === "chat.motion" ? (
+            <ChatMotionEntry key={e.id} event={e} />
+          ) : (
+            <article
+              className={`chat-event ${e.data["role"] === "user" ? "user" : ""} ${e.type === "chat.error" ? "chat-failure" : ""}`}
+              key={e.id}
+            >
+              <small>
+                {e.type === "chat.message"
+                  ? e.data["role"] === "user"
+                    ? "You"
+                    : model
+                  : e.type
+                      .replace("chat.", "")
+                      .replaceAll("_", " ")
+                      .toUpperCase()}{" "}
+                <time>{time(e.time)}</time>
+              </small>
+              {e.type === "chat.message" ? (
+                <p>{String(e.data["text"])}</p>
+              ) : (
+                <p>{String(e.data["message"] ?? e.data["text"] ?? "")}</p>
+              )}
+            </article>
+          )
+        )}
         {pendingUser ? (
           <article className="chat-event user">
             <small>
-              YOU <span className="typing">●</span>
+              You <span className="typing">●</span>
             </small>
             <p>{pendingUser}</p>
           </article>
@@ -210,18 +241,18 @@ export function ChatTab({
         {draft ? (
           <article className="chat-event">
             <small>
-              AGENT <span className="typing">●</span>
+              {model} <span className="typing">●</span>
             </small>
             <p>{draft}</p>
           </article>
         ) : null}
+        {running && !draft ? (
+          <output className="chat-working">{runStatus}</output>
+        ) : null}
         <div ref={chatEndRef} />
       </div>
       {available ? null : (
-        <div className="provider-note">
-          Connect Alibaba Token Plan or xAI in the app environment to enable
-          chat. Manual controls work independently.
-        </div>
+        <div className="provider-note">No model connected.</div>
       )}
       <form
         className="composer"
@@ -257,14 +288,12 @@ export function ChatTab({
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder={
-            running ? "Steer the current turn…" : "Ask, observe, experiment…"
+            running ? "Update the current instruction…" : "Message the robot…"
           }
           rows={3}
         />
         <div>
-          <span>
-            {running ? "Agent is working" : model || "Custom agent loop"}
-          </span>
+          <span>{running ? "New messages steer this turn" : ""}</span>
           {running ? (
             <button
               type="button"
@@ -277,7 +306,7 @@ export function ChatTab({
             </button>
           ) : null}
           <button className="send" disabled={!model || !message.trim()}>
-            {running ? "Steer" : "Send"} ↗
+            {running ? "Steer" : "Send"}
           </button>
         </div>
       </form>

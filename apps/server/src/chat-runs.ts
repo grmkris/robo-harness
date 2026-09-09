@@ -3,6 +3,7 @@ import type { ModelMessage } from "@tanstack/ai";
 import { Effect, Stream } from "effect";
 
 import { decodeHistory, encodeHistory } from "./chat-history";
+import { saveChatImage } from "./chat-images";
 import { createChatTools } from "./chat-tools";
 import { agentControlSignal } from "./control-lifecycle";
 import { runChatLoop } from "./loop";
@@ -174,7 +175,11 @@ export async function startChat(
         runId,
         vision: resolved.info.vision,
         steerRevision: () => state.revision,
-        onImage: (frame) => pendingImages.push(frame),
+        onImage: (frame) => {
+          const imageId = saveChatImage(sessionId, frame);
+          if (resolved.info.vision) pendingImages.push(frame);
+          return imageId;
+        },
         onProgress: (event) => {
           if (event.result?.status === "completed") completedActions += 1;
           emit("chat.motion", {

@@ -23,11 +23,14 @@ export function useEvents(logged: boolean | null, session: string | undefined) {
       if (decoded._tag === "None" || decoded.value.id <= lastEventId) return;
       const event = decoded.value;
       lastEventId = event.id;
-      setEvents((previous) =>
-        previous.some((p) => p.id === event.id)
-          ? previous
-          : [...previous, event].slice(-250)
-      );
+      // Text deltas belong to the draft; retaining them here evicts captured
+      // images and earlier messages during a long streamed reply.
+      if (event.type !== "chat.delta")
+        setEvents((previous) =>
+          previous.some((p) => p.id === event.id)
+            ? previous
+            : [...previous, event].slice(-250)
+        );
       // Only the open session's deltas feed its draft; another session's stream
       // must not bleed into this view.
       if (event.data["session_id"] !== session) {

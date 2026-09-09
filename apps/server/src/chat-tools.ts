@@ -83,7 +83,7 @@ export const createChatTools = (options: {
   signal: AbortSignal;
   vision: boolean;
   runId: string;
-  onImage: (frame: Frame) => void;
+  onImage: (frame: Frame) => string;
   onProgress: (event: MotionProgress) => void;
   steerRevision?: () => number;
 }) => {
@@ -241,10 +241,12 @@ export const createChatTools = (options: {
       const output = await executeTool(name, input, options.principal, signal);
       if (name === "capture" || name === "recording_frame") {
         const frame = Schema.decodeUnknownSync(Frame)(output);
-        if (options.vision) options.onImage(frame);
+        const imageId = options.onImage(frame);
         const { base64: _base64, ...metadata } = frame;
         return {
           ...metadata,
+          image_id: imageId,
+          archived: name === "recording_frame",
           note:
             name === "recording_frame"
               ? "Archived recording frame. Do not use it as a current observation for motion."

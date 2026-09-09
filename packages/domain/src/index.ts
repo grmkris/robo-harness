@@ -105,6 +105,24 @@ export const Frame = Schema.Struct({
 });
 export type Frame = typeof Frame.Type;
 
+/** Saved camera evidence in a chat tool result; bytes use an authenticated URL. */
+export const ChatCapture = Schema.Struct({
+  image_id: Schema.String.check(
+    Schema.isPattern(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    )
+  ),
+  id: Frame.fields.id,
+  camera: Frame.fields.camera,
+  seq: Frame.fields.seq,
+  wall_time_ms: Frame.fields.wall_time_ms,
+  age_ms: Frame.fields.age_ms,
+  width: Frame.fields.width,
+  height: Frame.fields.height,
+  archived: Schema.Boolean,
+});
+export type ChatCapture = typeof ChatCapture.Type;
+
 export const Lease = Schema.Struct({
   lease_id: Schema.String,
   ttl_ms: Schema.Int,

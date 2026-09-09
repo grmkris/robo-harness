@@ -12,7 +12,6 @@ import {
 } from "./components/perception-review";
 import { RecordingsTab } from "./components/recordings-tab";
 import { TerminalTab } from "./components/terminal-tab";
-import { TitleRow } from "./components/title-row";
 import { TopBar } from "./components/top-bar";
 import { Viewer } from "./components/viewer";
 import { useConversation } from "./hooks/use-conversation";
@@ -93,9 +92,6 @@ export function App() {
       setModel(first.models[0]!);
     }
   }, [status?.providers, model]);
-  useEffect(() => {
-    chatEnd.current?.scrollIntoView({ block: "nearest" });
-  }, [events.length, draft]);
   // Once the server echoes the optimistic message back for this session, drop
   // the local copy so it doesn't linger if the conversation is revisited.
   useEffect(() => {
@@ -190,8 +186,8 @@ export function App() {
         obs={obs}
         accessMode={status.access_mode}
         onLogout={() => setLogged(false)}
+        halt={halt}
       />
-      <TitleRow />
       {error ? (
         <div className="error-banner" role="alert">
           <span>{error}</span>
@@ -371,7 +367,6 @@ export function App() {
         pending={pending}
         activeMove={activeMove}
         run={run}
-        halt={halt}
         jogStep={jogStep}
         setJogStep={setJogStep}
         cartStep={cartStep}
@@ -379,16 +374,6 @@ export function App() {
         moveJoint={moveJoint}
         moveCartesian={moveCartesian}
       />
-      <footer className="footer">
-        <span>SMALL ARM. OPEN POSSIBILITIES.</span>
-        <span>
-          {obs?.operation
-            ? `Last motion: ${obs.operation.status}`
-            : "Ready to explore"}{" "}
-          · {obs?.calibration_id ?? "No calibration"}
-        </span>
-        <span>NETCUP ↔ LAB-PI</span>
-      </footer>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { Context, Effect, Layer, Schema } from "effect";
 
 import { equal, parseCursor, trustedSource } from "./access";
 import { getCapability, sweepCapabilities } from "./capabilities";
+import { chatImage } from "./chat-images";
 import * as agent from "./chat-runs";
 import { config } from "./config";
 import { decode, isUuid, Uuid } from "./decode";
@@ -371,6 +372,19 @@ async function handle(req: Request): Promise<Response | undefined> {
             .limit
         )
       );
+    }
+    if (path.startsWith("/api/chat-images/")) {
+      const id = path.slice("/api/chat-images/".length);
+      if (!isUuid(id)) return json({ error: "Invalid image" }, 400);
+      const image = chatImage(id);
+      if (!image) return json({ error: "Image unavailable" }, 404);
+      return new Response(new Uint8Array(image.bytes), {
+        headers: {
+          "Content-Type": image.media_type,
+          "Cache-Control": "private, no-store",
+          "X-Frame-Id": image.frame_id,
+        },
+      });
     }
     if (path === "/api/conversations") {
       return json(agent.conversations());

@@ -31,7 +31,6 @@ export function PerceptionBar({
   return (
     <>
       <div className="perception-bar">
-        <span className="eyebrow">LOOK CLOSER</span>
         <select
           aria-label="Perception camera"
           value={camera}

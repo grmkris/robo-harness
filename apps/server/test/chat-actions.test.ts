@@ -363,3 +363,66 @@ test("visual exploration retains before and after camera evidence across measure
     await h.close();
   }
 }, 15_000);
+
+test("chat stores exact camera pixels outside events and serves authenticated historical captures", async () => {
+  const h = await startHarness({
+    modelSteps: [
+      { calls: [{ name: "capture", input: { camera: "workspace" } }] },
+      { text: "Captured." },
+    ],
+  });
+  try {
+    const id = await start(h);
+    const result = await transcript(h, id);
+    const output = result.events.find(
+      (e) => e.type === "chat.tool_result" && e.data["name"] === "capture"
+    )?.data["output"] as { id: string; image_id: string };
+    expect(output.image_id).toBeString();
+    expect(JSON.stringify(result)).not.toContain("base64");
+    const url = `/api/chat-images/${output.image_id}`;
+    const response = await h.request(url);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Frame-Id")).toBe(output.id);
+    expect(response.headers.get("Content-Type")).toBe("image/jpeg");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    // The stored bytes must be the exact image delivered to the model.
+    expect(JSON.stringify(h.requests.at(-1)?.["messages"])).toContain(
+      bytes.toString("base64")
+    );
+    await h.call("capture", { camera: "workspace" });
+    const reopened = await h.request(`/api/conversations/${id}`);
+    expect(JSON.stringify(await reopened.json())).toContain(output.image_id);
+    expect(
+      Buffer.from(await (await h.request(url)).arrayBuffer()).equals(bytes)
+    ).toBe(true);
+    expect((await fetch(h.base + url)).status).toBe(401);
+    expect((await h.request("/api/chat-images/not-an-id")).status).toBe(400);
+    expect(
+      (await h.request(`/api/chat-images/${crypto.randomUUID()}`)).status
+    ).toBe(404);
+  } finally {
+    await h.close();
+  }
+}, 15_000);
+
+test("text-only models still save captures for the operator without receiving image input", async () => {
+  const h = await startHarness({
+    env: { ROBO_ALIBABA_VISION: "0" },
+    modelSteps: [
+      { calls: [{ name: "capture", input: { camera: "wrist" } }] },
+      { text: "Metadata received." },
+    ],
+  });
+  try {
+    const result = await transcript(h, await start(h));
+    const output = result.events.find((e) => e.type === "chat.tool_result")
+      ?.data["output"] as { image_id: string };
+    expect(output.image_id).toBeString();
+    expect(
+      (await h.request(`/api/chat-images/${output.image_id}`)).status
+    ).toBe(200);
+    expect(JSON.stringify(h.requests)).not.toContain("data:image");
+  } finally {
+    await h.close();
+  }
+}, 15_000);

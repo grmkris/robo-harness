@@ -54,7 +54,7 @@ if opened.returncode:
 browser(
     "await page.context().clearCookies(); await page.goto("
     + json.dumps(BASE)
-    + ", {waitUntil:'domcontentloaded'}); await page.getByRole('heading', {name:'The robot workbench.'}).waitFor();"
+    + ", {waitUntil:'domcontentloaded'}); await page.getByRole('heading', {name:'Robo Harness'}).waitFor();"
     + "if(await page.getByLabel('Operator token').count())throw new Error('Unexpected login prompt');",
     "workbench opens without a token",
 )
@@ -223,7 +223,7 @@ await page.addInitScript(()=>{
  };
 });
 await page.reload({waitUntil:'domcontentloaded'});
-await page.getByRole('heading',{name:'The robot workbench.'}).waitFor();
+await page.getByRole('heading',{name:'Robo Harness'}).waitFor();
 """,
         "observe the browser event stream for replay acceptance",
     )
@@ -232,12 +232,12 @@ await page.getByRole('heading',{name:'The robot workbench.'}).waitFor();
 await page.getByRole('button',{name:'chat',exact:true}).click();
 await page.getByLabel('Model',{exact:true}).selectOption('alibaba:fixture');
 await page.getByLabel('Model image capability').waitFor();
-if(!(await page.getByLabel('Model image capability').innerText()).includes('Camera images enabled'))throw new Error('Vision capability missing');
+if(!(await page.getByLabel('Model image capability').innerText()).includes('Images'))throw new Error('Vision capability missing');
 await page.getByLabel('Model',{exact:true}).selectOption('alibaba:qwen3-coder-next');
 if(!(await page.getByLabel('Model image capability').innerText()).includes('Text only'))throw new Error('Selected model capability did not change');
 await page.getByLabel('Model',{exact:true}).selectOption('alibaba:fixture');
 await page.getByLabel('Message the robot agent').fill('Move the mock gripper a little and report the measured result.');
-await page.getByRole('button',{name:'Send ↗',exact:true}).click();
+await page.getByRole('button',{name:'Send',exact:true}).click();
 await page.waitForFunction(()=>document.querySelector('.chat-log')?.textContent?.includes('Invalid tool arguments'),null,{timeout:15000});
 await page.waitForFunction(()=>document.querySelector('.motion-progress')?.textContent?.includes('measured completion'),null,{timeout:15000});
 await page.waitForFunction(()=>document.querySelector('.chat-log')?.textContent?.includes('Fixture move completed'),null,{timeout:15000});
@@ -247,10 +247,33 @@ await page.waitForFunction(async()=>{const s=await(await fetch('/api/status')).j
 """,
         "chat model capabilities, validation recovery, and measured motion",
     )
+    if os.environ.get("ROBO_BROWSER_CAPTURE_CHECK") == "1":
+        browser(
+            r"""
+await page.waitForFunction(()=>document.querySelectorAll('.chat-capture img').length===4);
+const images=page.locator('.chat-capture img');
+for(let i=0;i<await images.count();i++)await images.nth(i).scrollIntoViewIfNeeded();
+await page.waitForFunction(()=>[...document.querySelectorAll('.chat-capture img')].every(img=>img.complete&&img.naturalWidth>0));
+const urls=await images.evaluateAll(imgs=>imgs.map(img=>img.getAttribute('src')));
+if(new Set(urls).size!==4)throw new Error('Before and after captures must be distinct artifacts');
+await page.locator('.motion-progress summary').click();
+await page.locator('.motion-progress table').waitFor();
+if(!(await page.locator('.motion-progress table').innerText()).includes('42.00'))throw new Error('Measured joint table missing');
+await page.reload({waitUntil:'domcontentloaded'});
+await page.waitForFunction(()=>document.querySelectorAll('.chat-capture img').length===4);
+const restored=await page.locator('.chat-capture img').evaluateAll(imgs=>imgs.map(img=>img.getAttribute('src')));
+if(JSON.stringify(urls)!==JSON.stringify(restored))throw new Error('Reload changed captured images');
+if(await page.locator('.chat-tool').count()!==6)throw new Error('Tool calls and results were not grouped');
+if((await page.locator('body').innerText()).includes('YOUR LAB PARTNER'))throw new Error('Decorative copy remains');
+""",
+            "inline before/after captures, measured table, reload persistence and grouped tools",
+        )
     browser(
         r"""
 await page.setViewportSize({width:390,height:844});
-await page.getByRole('button',{name:'STOP / HOLD'}).scrollIntoViewIfNeeded();
+await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
+const stop=await page.getByRole('button',{name:'STOP / HOLD'}).boundingBox();
+if(!stop||stop.y<0||stop.y+stop.height>844)throw new Error('Stop must remain visible while scrolled');
 if(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+2))throw new Error('Mobile page overflows');
 await page.setViewportSize({width:1440,height:1100});
 await page.evaluate(()=>window.scrollTo(0,0));

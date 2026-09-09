@@ -42,7 +42,6 @@ export function Viewer({
     <>
       <div className="panel-head">
         <div className="panel-heading">
-          <span className="eyebrow">01 / OBSERVATION</span>
           <strong>{replay ? "Recorded session" : "Live workspace"}</strong>
         </div>
         <div className="toolbar">

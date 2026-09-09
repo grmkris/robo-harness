@@ -12,7 +12,6 @@ export function ControlDeck({
   pending,
   activeMove,
   run,
-  halt,
   jogStep,
   setJogStep,
   cartStep,
@@ -26,7 +25,6 @@ export function ControlDeck({
   pending: boolean;
   activeMove: boolean;
   run: (name: string, input?: unknown) => Promise<unknown>;
-  halt: () => Promise<void>;
   jogStep: number;
   setJogStep: Dispatch<SetStateAction<number>>;
   cartStep: number;
@@ -38,7 +36,6 @@ export function ControlDeck({
     <section className="control-deck panel">
       <div className="control-header">
         <div className="panel-heading">
-          <span className="eyebrow">02 / CONTROL</span>
           <strong>
             <MoveIcon />{" "}
             {obs?.operator
@@ -76,23 +73,12 @@ export function ControlDeck({
           >
             Release
           </button>
-          <button
-            className="stop-button"
-            onClick={() => {
-              void halt();
-            }}
-          >
-            ■ STOP / HOLD
-          </button>
         </div>
       </div>
       <div className="joint-grid">
-        {joints.map((j, i) => (
+        {joints.map((j) => (
           <div className="joint" key={j}>
-            <div className="joint-name">
-              <span>0{i + 1}</span>
-              {label(j)}
-            </div>
+            <div className="joint-name">{label(j)}</div>
             <div className="joint-value">
               {obs?.measured[j].toFixed(1) ?? "—"}
               <small>{j === "gripper" ? "%" : "°"}</small>

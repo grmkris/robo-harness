@@ -8,24 +8,26 @@ export function TopBar({
   obs,
   accessMode,
   onLogout,
+  halt,
 }: {
   fresh: boolean;
   obs: Observation | null | undefined;
   accessMode: Status["access_mode"];
   onLogout: () => void;
+  halt: () => Promise<void>;
 }) {
   return (
     <header className="topbar">
-      <a className="brand" href="/">
-        RH
-        <span className="brand-separator" />
-        ROBO HARNESS<sup>LAB / 01</sup>
-      </a>
+      <h1>
+        <a className="brand" href="/">
+          Robo Harness
+        </a>
+      </h1>
       <div className="top-status">
         <span className={`led ${fresh ? "good" : "bad"}`} />
-        {fresh ? "ROBOT CONNECTED" : "ROBOT UNAVAILABLE"}
+        {fresh ? "Connected" : "Unavailable"}
         <span className="backend">
-          {obs?.backend === "mock" ? "SIMULATED" : "SO-101"}
+          {obs?.backend === "mock" ? "Mock" : "SO-101"}
         </span>
       </div>
       {accessMode === "token" ? (
@@ -35,11 +37,18 @@ export function TopBar({
             void api("logout", {}).then(onLogout);
           }}
         >
-          Lock workbench ↗
+          Lock
         </button>
-      ) : (
-        <span className="eyebrow">TAILSCALE ACCESS</span>
-      )}
+      ) : null}
+      <button
+        type="button"
+        className="stop-button"
+        onClick={() => {
+          void halt();
+        }}
+      >
+        ■ STOP / HOLD
+      </button>
     </header>
   );
 }
