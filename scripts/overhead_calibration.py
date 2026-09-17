@@ -33,6 +33,12 @@ MIN_SPAN_M = 0.15
 MIN_INLIER_FRACTION = 0.6
 MAX_P90_M = 0.010
 RANSAC_ROUNDS = 3000
+MIN_FRAMES = 20
+# The piece: a bright blob of a plausible size, surrounded by dark mat.
+BRIGHT = 170
+DARK_MAT = 80
+DARK_SURROUND = 90
+PIECE_MIN_PX, PIECE_MAX_PX = 8, 80
 # A homogeneous coordinate this close to zero is a point at infinity.
 DEGENERATE_W = 1e-12
 
@@ -90,7 +96,7 @@ def tip_pixel(frame: np.ndarray, background: np.ndarray) -> tuple[int, int] | No
 def mat_mask(full: np.ndarray) -> np.ndarray:
     """The mat: the largest dark region, holes filled, edges pulled in so that
     the table beyond the mat edge and the arm above it do not count."""
-    dark = ndimage.binary_opening(full < 80, iterations=6)
+    dark = ndimage.binary_opening(full < DARK_MAT, iterations=6)
     labels, count = ndimage.label(dark)
     if count == 0:
         return np.zeros_like(dark)
@@ -108,12 +114,12 @@ def find_piece(background: np.ndarray) -> dict | None:
         dtype=np.float32,
     )
     on_mat = mat_mask(full)
-    labels, count = ndimage.label(full > 170)
+    labels, count = ndimage.label(full > BRIGHT)
     best = None
     for index in range(1, count + 1):
         ys, xs = np.nonzero(labels == index)
         w, h = int(np.ptp(xs)) + 1, int(np.ptp(ys)) + 1
-        if not (8 <= w <= 80 and 8 <= h <= 80):
+        if not (PIECE_MIN_PX <= w <= PIECE_MAX_PX and PIECE_MIN_PX <= h <= PIECE_MAX_PX):
             continue
         cx, cy = float(xs.mean()), float(ys.mean())
         if not on_mat[int(cy), int(cx)]:
@@ -128,7 +134,7 @@ def find_piece(background: np.ndarray) -> dict | None:
             full[max(0, top - h) : top, left:right],
             full[bottom + 1 : bottom + 1 + h, left:right],
         ]
-        if any(side.size < w * h // 2 or side.mean() > 90 for side in sides):
+        if any(side.size < w * h // 2 or side.mean() > DARK_SURROUND for side in sides):
             continue
         surround = float(np.mean([side.mean() for side in sides]))
         candidate = {
@@ -163,8 +169,8 @@ def main() -> None:
         seen.add(image["id"])
         frames.append(load_gray(recording / image["path"]))
         tips_m.append(sample["observation"]["ee"][:2])
-    if len(frames) < 20:
-        raise SystemExit(f"only {len(frames)} distinct overhead frames; need at least 20")
+    if len(frames) < MIN_FRAMES:
+        raise SystemExit(f"only {len(frames)} distinct overhead frames; need at least {MIN_FRAMES}")
     stack = np.stack(frames)
     background = np.median(stack, axis=0)
 
@@ -176,7 +182,7 @@ def main() -> None:
             metres.append(xy)
     pixels_a = np.array(pixels, dtype=np.float64)
     metres_a = np.array(metres, dtype=np.float64)
-    if len(pixels_a) < 8:
+    if len(pixels_a) < PIECE_MIN_PX:
         raise SystemExit(f"only {len(pixels_a)} tip detections; nothing to fit")
 
     rng = np.random.default_rng(0)
