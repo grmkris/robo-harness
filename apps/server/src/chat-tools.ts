@@ -10,16 +10,15 @@ import {
 import { toolDefinition, type Tool } from "@tanstack/ai";
 import { Schema } from "effect";
 
-import { actionLedger } from "./action-ledger";
 import { config } from "./config";
 import { decode } from "./decode";
-import { createMotionExecutor, type MotionProgress } from "./motion-actions";
+import type { MotionProgress } from "./motion-actions";
+import { motionExecutor as executor } from "./motion-executor";
 import { perceptionConfig } from "./perception";
 import * as robot from "./robot";
 import { ToolFailure } from "./tool-errors";
 import { descriptions, executeTool, type Principal } from "./tools";
 
-const executor = createMotionExecutor(robot.motionIO, actionLedger);
 const schemas = {
   observe: toolSchemas.observe,
   capture: toolSchemas.capture,
