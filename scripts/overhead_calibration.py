@@ -34,6 +34,7 @@ MIN_INLIER_FRACTION = 0.6
 MAX_P90_M = 0.010
 RANSAC_ROUNDS = 3000
 MIN_FRAMES = 20
+MIN_DETECTIONS = 8
 # The piece: a bright blob of a plausible size, surrounded by dark mat.
 BRIGHT = 170
 DARK_MAT = 80
@@ -182,7 +183,7 @@ def main() -> None:
             metres.append(xy)
     pixels_a = np.array(pixels, dtype=np.float64)
     metres_a = np.array(metres, dtype=np.float64)
-    if len(pixels_a) < PIECE_MIN_PX:
+    if len(pixels_a) < MIN_DETECTIONS:
         raise SystemExit(f"only {len(pixels_a)} tip detections; nothing to fit")
 
     rng = np.random.default_rng(0)
