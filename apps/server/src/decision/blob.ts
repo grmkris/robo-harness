@@ -13,6 +13,8 @@ export interface BlobOptions {
   readonly minPixels: number;
   /** Bright regions spanning at least this fraction of the frame width or height are background. */
   readonly maxSpan: number;
+  /** Bright regions covering at least this fraction of the frame are background. */
+  readonly maxArea: number;
 }
 
 const defaults: BlobOptions = {
@@ -20,6 +22,7 @@ const defaults: BlobOptions = {
   stride: 4,
   minPixels: 12,
   maxSpan: 0.8,
+  maxArea: 0.12,
 };
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
@@ -66,11 +69,23 @@ export const whiteBlob = (
       }
     }
   }
-  // A bright region spanning most of the frame is the white table or wall,
-  // not a 2-3 cm piece; report it as background instead of a detection.
+  // A bright region spanning most of the frame, covering a good part of it,
+  // or running off its edge is the white table or wall, not a 2-3 cm piece;
+  // report it as background instead of a detection. A wedge of table at the
+  // mat edge once passed as the piece and the arm went to centre on it.
   const spanX = count > 0 ? (right - left) / image.width : 0;
   const spanY = count > 0 ? (bottom - top) / image.height : 0;
-  const background = spanX >= settings.maxSpan || spanY >= settings.maxSpan;
+  const touchesEdge =
+    count > 0 &&
+    (left <= settings.stride ||
+      top <= settings.stride ||
+      right >= image.width - settings.stride * 2 ||
+      bottom >= image.height - settings.stride * 2);
+  const background =
+    spanX >= settings.maxSpan ||
+    spanY >= settings.maxSpan ||
+    count / Math.max(1, samples) >= settings.maxArea ||
+    touchesEdge;
   const visible = count >= settings.minPixels && !background;
   const nx = (x: number) => round((x / image.width) * 2 - 1);
   const ny = (y: number) => round((y / image.height) * 2 - 1);
@@ -85,12 +100,7 @@ export const whiteBlob = (
     center_x: visible ? nx(sumX / count) : null,
     center_y: visible ? ny(sumY / count) : null,
     bbox: visible ? [nx(left), ny(top), nx(right), ny(bottom)] : null,
-    touches_edge:
-      visible &&
-      (left <= settings.stride ||
-        top <= settings.stride ||
-        right >= image.width - settings.stride * 2 ||
-        bottom >= image.height - settings.stride * 2),
+    touches_edge: touchesEdge,
     background,
     frame: "image pixels, uncalibrated",
   };

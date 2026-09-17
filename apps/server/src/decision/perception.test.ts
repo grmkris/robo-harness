@@ -56,6 +56,11 @@ test("the blob centre and box are image offsets of the bright piece", () => {
   const table = whiteBlob(frame("wrist", [480, 0, 640, 480]));
   expect(table["visible"]).toBe(false);
   expect(table["background"]).toBe(true);
+  // A wedge of table at the mat edge: modest span, but it runs off the frame.
+  const wedge = whiteBlob(frame("wrist", [420, 300, 640, 480]));
+  expect(wedge["visible"]).toBe(false);
+  expect(wedge["background"]).toBe(true);
+  expect(wedge["touches_edge"]).toBe(true);
 });
 
 test("scene replies are parsed strictly and failures stay short", async () => {
