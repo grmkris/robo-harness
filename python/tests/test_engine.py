@@ -558,3 +558,17 @@ def test_leader_target_outside_the_commissioned_range_latches_a_fault(rig):
     assert e.fault is not None
     assert "commissioned range" in e.fault
     assert e.commanded == before
+
+
+def test_joints_the_target_does_not_mention_hold_their_command_not_their_sag(rig):
+    e, c = rig
+    lease = e.acquire("agent")
+    # The lift sags below its command under gravity, as a real joint does.
+    e.measured = {**e.measured, "shoulder_lift": e.commanded["shoulder_lift"] - 0.4}
+    op = e.submit("pan", lease["lease_id"], "agent", target={"shoulder_pan": e.measured["shoulder_pan"] + 1})
+    assert op["target"]["shoulder_lift"] == e.commanded["shoulder_lift"]
+    assert op["start"]["shoulder_lift"] == e.commanded["shoulder_lift"]
+    # And the commanded joint is stepped from where it actually is.
+    assert op["start"]["shoulder_pan"] == e.measured["shoulder_pan"]
+    advance(e, c, 0.1)
+    assert e.commanded["shoulder_lift"] == op["target"]["shoulder_lift"]

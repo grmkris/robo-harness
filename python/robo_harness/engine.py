@@ -303,6 +303,7 @@ class Engine:
             if self.operation and self.operation["status"] in ("accepted", "running"):
                 raise ControlError("A motion is already running")
             start = self.measured.copy()
+            hold = self.commanded.copy()
         # Trajectory planning must never hold the motor-thread mutex.
         if not math.isfinite(duration_s) or not MIN_DURATION_S <= duration_s <= MAX_DURATION_S:
             raise ControlError("Duration must be between 0.1 and 10 seconds", 400)
@@ -319,7 +320,14 @@ class Engine:
                 raise ControlError(str(e), 422) from e
         if not target or any(j not in JOINTS for j in target):
             raise ControlError("Unknown or empty joint target", 400)
-        goal = {**start, **target}
+        # Joints the target does not mention keep their commanded position,
+        # not their measured one. Under gravity a joint settles a few tenths
+        # of a degree below its command; re-commanding that sagged reading on
+        # every move ratcheted a raised arm down 4 cm over thirty pan moves
+        # (2026-09-18). The measured position is still what a commanded
+        # joint's step and speed limits are measured from.
+        goal = {**hold, **target}
+        origin = {**hold, **{j: start[j] for j in target}}
         for j, v in goal.items():
             lo, hi = self.profile["limits"][j]
             if (
@@ -337,7 +345,7 @@ class Engine:
         samples = []
         try:
             for n in range(31):
-                p = {j: start[j] + (goal[j] - start[j]) * n / 30 for j in JOINTS}
+                p = {j: origin[j] + (goal[j] - origin[j]) * n / 30 for j in JOINTS}
                 self.kin.validate(p, self.profile)
                 samples.append(self.kin.xyz(p).tolist())
         except ValueError as e:
@@ -370,7 +378,7 @@ class Engine:
                 "owner": owner,
                 "status": "accepted",
                 "target": goal,
-                "start": start,
+                "start": origin,
                 "duration_s": duration_s,
                 "started_ms": time.time() * 1000,
                 "_started": self.clock(),
