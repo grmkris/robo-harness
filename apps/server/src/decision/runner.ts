@@ -12,6 +12,8 @@ import { candidates, defaultLimits, type Action } from "./candidates";
 import { jevEvaluator, jevRate, memoryMeter } from "./jev";
 import { runDecisionLoop } from "./loop";
 import { mockEvaluator } from "./mock";
+import { pickupPerception } from "./perception";
+import { sceneConfig } from "./scene";
 import { sqliteMeter } from "./spend";
 import { QUESTION_VERSION } from "./state";
 import { deciderFor, strategyNames } from "./strategies";
@@ -35,6 +37,14 @@ export const DecisionRunRequest = Schema.Struct({
     60
   ),
   supervised: withDefault(Schema.Boolean, false),
+  scene: withDefault(Schema.Boolean, false),
+  scene_model: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80))
+  ),
+  scene_every: withDefault(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 })),
+    5
+  ),
   timeout_ms: withDefault(
     Schema.Int.check(Schema.isBetween({ minimum: 200, maximum: 30_000 })),
     8000
@@ -117,6 +127,13 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
       412
     );
   }
+  const scene = request.scene ? sceneConfig(request.scene_model) : null;
+  if (request.scene && !scene) {
+    throw new robot.ApiError(
+      "Scene description needs CLIPROXY_API_KEY or ROBO_SCENE_API_KEY in the coordinator environment",
+      412
+    );
+  }
   const first = await robot.motionIO.observe(AbortSignal.timeout(3000));
   if (request.mode === "execute" && first.backend === "so101") {
     if (!request.supervised) {
@@ -163,6 +180,14 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
           timeoutMs: request.timeout_ms,
         });
   const decider = deciderFor(request.strategy, evaluate);
+  const perception =
+    task.name === "pickup-white-piece"
+      ? pickupPerception({
+          capture: (camera) => robot.capture(camera),
+          scene,
+          sceneEvery: request.scene_every,
+        })
+      : null;
   const abort = new AbortController();
   const signal = AbortSignal.any([abort.signal, agentControlSignal()]);
   const startedEvent = log("started", {
@@ -174,6 +199,7 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
     limits: defaultLimits,
     question_version: QUESTION_VERSION,
     rate,
+    scene_model: scene?.model ?? null,
     log_path: logPath,
   });
   activeDecisionRuns.add(runId);
@@ -199,6 +225,12 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
             log(event, data);
           },
           sleep: (ms) => Bun.sleep(ms),
+          ...(perception
+            ? {
+                perceive: perception.perceive,
+                perceivedComplete: perception.complete,
+              }
+            : {}),
           onOffered: (next) => {
             offered = next;
           },

@@ -11,6 +11,7 @@
     "@tanstack/ai-openai": "0.22.5",
     "ai": "7.0.105",
     "effect": "4.0.0-rc.112",
+    "jpeg-js": "0.4.4",
     "openai": "6.49.0",
     "pngjs": "7.0.0"
   },
