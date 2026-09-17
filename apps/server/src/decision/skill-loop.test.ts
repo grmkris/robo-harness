@@ -38,6 +38,7 @@ const config: SkillConfig = {
 const simulate = (piece: Vec3, startPose: Record<Joint, number>) => {
   let measured = { ...startPose };
   let moves = 0;
+  const tips: Vec3[] = [];
   const observe = (): Observation => {
     const m = tipFrame(measured);
     return fixtureObservation({
@@ -105,6 +106,7 @@ const simulate = (piece: Vec3, startPose: Record<Joint, number>) => {
       };
     }
     measured = next;
+    tips.push(tip);
     return { status: "completed", after: observe(), message: "ok" };
   };
   return {
@@ -113,6 +115,7 @@ const simulate = (piece: Vec3, startPose: Record<Joint, number>) => {
     move,
     moves: () => moves,
     measured: () => measured,
+    tips: () => tips,
   };
 };
 
@@ -173,6 +176,26 @@ test("scan finds a piece outside the initial view", async () => {
     .map((e) => String(e.data["skill"]));
   expect(skills[0]).toBe("scan_for_piece");
   expect(summary.end_reason).toBe("done");
+});
+
+test("the search never gives back the height it climbed", async () => {
+  // On the real arm a "step outward" once lost 6 cm of height and the sweep
+  // never left r = 0.16 m, because one solve was walked in joint space
+  // without checking where the tip ended up.
+  const { events, sim } = await runWith(rulesTactician(), matPiece(0.3, 0.14));
+  const scanMoves = Number(
+    events.find((e) => e.event === "skill_finished")?.data["moves"] ?? 0
+  );
+  expect(scanMoves).toBeGreaterThan(0);
+  const heights = sim
+    .tips()
+    .slice(0, scanMoves)
+    .map((t) => t[2] - config.matZ);
+  let peak = 0;
+  for (const h of heights) {
+    peak = Math.max(peak, h);
+    expect(h).toBeGreaterThan(peak - 0.015);
+  }
 });
 
 test("a Jev tactician through the AI SDK evaluate path completes the pickup and reuses cached judgments", async () => {

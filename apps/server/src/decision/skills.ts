@@ -51,6 +51,8 @@ export interface SkillConfig {
   readonly scanHeightM: number;
   /** Tip clearance below which a sweep would drag across the mat. */
   readonly sweepClearanceM: number;
+  /** Radius from the base at which the first search arc runs. */
+  readonly scanRadiusM: number;
   readonly liftM: number;
   readonly openPercent: number;
   readonly heldPercent: number;
@@ -73,6 +75,7 @@ export const skillDefaults = {
   graspHeightM: 0.012,
   scanHeightM: 0.1,
   sweepClearanceM: 0.03,
+  scanRadiusM: 0.2,
   liftM: 0.05,
   openPercent: 60,
   heldPercent: 4,
@@ -259,43 +262,105 @@ const goToward = async (
   return { obs, reached: false, moves: maxMoves };
 };
 
-/** Move the tip by a Cartesian displacement keeping the gripper pointing down. */
+/** Waypoints no further apart than this keep a joint-space walk close to the straight line. */
+const TIP_SEGMENT_M = 0.03;
+/** A tip within this of its target has arrived. */
+const TIP_TOLERANCE_M = 0.008;
+
+const tipOf = (obs: Observation) => position(tipFrame(obs.measured));
+
+const distance = (a: Vec3, b: Vec3) =>
+  Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+/**
+ * Move the tip by a Cartesian displacement keeping the gripper pointing down.
+ *
+ * Solved and walked in short segments, and judged on where the tip actually
+ * ended up. One solve followed by a joint-space walk is not enough: the walk
+ * between two joint poses is not a straight line for the tip, and a step
+ * "7 cm outward" once lost 6 cm of height and gained 3 cm of reach without
+ * anything reporting it.
+ */
 const moveTip = async (
   ctx: SkillContext,
   displacement: Vec3,
   maxMoves = 12
 ) => {
-  const obs = await ctx.observe();
-  const [x, y, z] = position(tipFrame(obs.measured));
+  let obs = await ctx.observe();
+  const from = tipOf(obs);
   const target: Vec3 = [
-    x + displacement[0],
-    y + displacement[1],
-    z + displacement[2],
+    from[0] + displacement[0],
+    from[1] + displacement[1],
+    from[2] + displacement[2],
   ];
   if (target[2] - ctx.config.matZ < 0.004) {
     return {
       obs,
       reached: false,
       moves: 0,
+      errorM: distance(from, target),
       vetoed: "target below mat clearance",
     };
   }
-  const solution = reach(obs.measured, target, ctx.config.limits);
-  if (solution.errorM > 0.006 || solution.downness < 0.95) {
+  // The whole target must be reachable before any segment is walked.
+  const check = reach(obs.measured, target, ctx.config.limits);
+  if (check.errorM > 0.006 || check.downness < 0.95) {
     return {
       obs,
       reached: false,
       moves: 0,
-      vetoed: `unreachable (error ${round(solution.errorM)} m, downness ${round(solution.downness)})`,
+      errorM: distance(from, target),
+      vetoed: `unreachable (error ${round(check.errorM)} m, downness ${round(check.downness)})`,
     };
   }
-  const goal: Partial<Record<Joint, number>> = {
-    shoulder_pan: solution.pose.shoulder_pan,
-    shoulder_lift: solution.pose.shoulder_lift,
-    elbow_flex: solution.pose.elbow_flex,
-    wrist_flex: solution.pose.wrist_flex,
+  const startMoves = ctx.memory.movesUsed;
+  const segments = Math.max(
+    1,
+    Math.ceil(distance(from, target) / TIP_SEGMENT_M)
+  );
+  // One extra round corrects whatever the segments left over.
+  for (let round_ = 1; round_ <= segments + 1; round_ += 1) {
+    const here = tipOf(obs);
+    if (distance(here, target) <= TIP_TOLERANCE_M) break;
+    const remaining = maxMoves - (ctx.memory.movesUsed - startMoves);
+    if (remaining <= 0) break;
+    const fraction = Math.min(1, round_ / segments);
+    const waypoint: Vec3 = [
+      from[0] + displacement[0] * fraction,
+      from[1] + displacement[1] * fraction,
+      from[2] + displacement[2] * fraction,
+    ];
+    const solution = reach(obs.measured, waypoint, ctx.config.limits);
+    if (solution.errorM > 0.006 || solution.downness < 0.95) {
+      return {
+        obs,
+        reached: false,
+        moves: ctx.memory.movesUsed - startMoves,
+        errorM: distance(here, target),
+        vetoed: `unreachable waypoint (error ${round(solution.errorM)} m, downness ${round(solution.downness)})`,
+      };
+    }
+    const goal: Partial<Record<Joint, number>> = {
+      shoulder_pan: solution.pose.shoulder_pan,
+      shoulder_lift: solution.pose.shoulder_lift,
+      elbow_flex: solution.pose.elbow_flex,
+      wrist_flex: solution.pose.wrist_flex,
+    };
+    const walked = await goToward(ctx, goal, remaining);
+    obs = walked.obs;
+    const after = tipOf(obs);
+    // No measurable progress on a segment means the joints are not following;
+    // more rounds would only spend the budget.
+    if (distance(here, after) < 0.003 && !walked.reached) break;
+  }
+  const errorM = distance(tipOf(obs), target);
+  return {
+    obs,
+    reached: errorM <= TIP_TOLERANCE_M,
+    moves: ctx.memory.movesUsed - startMoves,
+    errorM,
+    vetoed: null,
   };
-  return { ...(await goToward(ctx, goal, maxMoves)), vetoed: null };
 };
 
 const result = (
@@ -321,19 +386,33 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
   }
   // The wrist camera sits above the fingertips and looks along them, so a
   // hover a few centimetres over the mat covers only about a hand's width of
-  // it. Rise first: at the scan height one arc covers roughly 20 cm of mat.
-  const climb = ctx.config.scanHeightM - heightAboveMat(obs, ctx.config);
-  if (climb > 0.01) {
-    const up = await moveTip(ctx, [0, 0, climb], 24);
-    obs = up.obs;
+  // it, and a sweep hugging the base covers only the mat's near edge. Go to
+  // the start of the search first: the scan height, at a real radius along
+  // the current heading. At that height one arc covers roughly 20 cm of mat.
+  const [x0, y0] = tipOf(obs);
+  const heading = Math.atan2(y0, x0);
+  const startRadius = Math.max(Math.hypot(x0, y0), ctx.config.scanRadiusM);
+  const startTip: Vec3 = [
+    Math.cos(heading) * startRadius,
+    Math.sin(heading) * startRadius,
+    ctx.config.matZ + ctx.config.scanHeightM,
+  ];
+  const here = tipOf(obs);
+  if (distance(here, startTip) > TIP_TOLERANCE_M) {
+    const go = await moveTip(
+      ctx,
+      [startTip[0] - here[0], startTip[1] - here[1], startTip[2] - here[2]],
+      60
+    );
+    obs = go.obs;
     if (
-      up.vetoed &&
+      go.vetoed &&
       heightAboveMat(obs, ctx.config) < ctx.config.scanHeightM / 2
     ) {
       return result(
         "scan_for_piece",
         "vetoed",
-        `cannot rise to sweep: ${up.vetoed}`,
+        `cannot reach the search start: ${go.vetoed}`,
         ctx.memory.movesUsed - startMoves
       );
     }
@@ -341,7 +420,7 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
       return result(
         "scan_for_piece",
         "done",
-        "piece seen while rising",
+        "piece seen on the way to the search start",
         ctx.memory.movesUsed - startMoves
       );
     }
@@ -369,7 +448,7 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
         radius < 0.01
           ? [step, 0, 0]
           : [(x / radius) * step, (y / radius) * step, 0],
-        24
+        40
       );
       obs = out.obs;
       if (out.vetoed) {
