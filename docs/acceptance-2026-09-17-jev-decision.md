@@ -50,3 +50,32 @@ No faults latched. Total Jev spend for the day ≈ $0.003.
 
 - A follower USB board stopped enumerating after the arm power was pulled (`device not accepting address … error -22`); only a full power cycle of the Pi and both arms recovered it.
 - Startup refuses a joint left past its calibration range (elbow 0.6° past its maximum after a hand reposition); move it inward by hand with torque off.
+
+## Skill-level tactician (jev-drone pattern)
+
+Choosing 1.8° joint steps from a state that does not contain the answer cannot find or grasp anything, so the model now chooses _skills_ and code owns the loops, following `RomanSlack/jev-drone`'s `tactics.py`: mission plus capabilities plus observed scene, rubrics that name state fields, a scene fingerprint that caches judgments, and the veto in code ([0011](decisions/0011-decision-runner.md), `decision/skills.ts`, `scene-state.ts`, `tactics.ts`, `skill-loop.ts`).
+
+Two skills had to be rebuilt before the first real run could work:
+
+- **Search.** Panning at the current height sees almost nothing: the wrist camera sits above the fingertips and looks along them, so a 5 cm hover covers about a hand's width of mat while the piece sat 20 cm away. The search now rises to a vantage height and sweeps a serpentine raster — an arc of pan, a step further out, an arc back.
+- **Centring.** An image Jacobian estimated from two probe moves was the fragile part: one wrong sign or scale pushed the piece out of frame and the loop reported it lost. Centring now takes a small tip step, keeps it only when the piece measurably moved closer in the image, and undoes it otherwise, trying the direction that last worked first. Nothing needs calibrating, and a step judged by its own result cannot drive the piece out of frame.
+
+In the simulated arm (real URDF kinematics, a wrist camera 6 cm up the gripper, jaws stalling at 12 % on the piece) the pickup runs scan, centre, open, descend, re-centre, close, lift in 209 moves. Before the rebuild it stalled four times and needed a lucky `back_off`.
+
+## What the Pi could not carry (2026-09-17)
+
+The first recorded attempt died after five moves with `skill_aborted: move cancelled: Motion cancelled: Control loop deadline missed`, and its recording held 39 frames. The Pi was at 81.3 °C with `throttled=0x80008` — the soft temperature limit, which drops it to 1.5 GHz.
+
+- **robo-io encoded every frame nobody asked for.** Both cameras were JPEG- and base64-encoded at 30 fps: measured on the Pi, 7.3 ms per `imencode` plus 1 ms of base64, about half the process's CPU, in the same process as the 30 Hz motor loop. Consumers pull at 10 Hz at most. Encoding is now lazy and the process dropped from 83 % to 64 % of a core.
+- **Perception is capped in the runner**: one wrist frame per 400 ms with the previous view reused, and the search looks every second move.
+- Measured after both changes, sampling `/observe` at 20 Hz for 60 s: 16.8 ms p50, 32.3 ms p95, 42.6 ms worst — against a 250 ms deadline, idle and while recording. The Pi still sits at 79–81 °C; it wants the €5 fan the lab notes already ask for.
+
+## Recordings over the tailnet
+
+Three separate faults, each of which made a recording useless:
+
+- **One transient stale observation ended the recording.** The observation age from netcup is 223 ms p95 against a 250 ms gate, so recordings died within seconds. Transient misses are now counted and retried; only 50 consecutive ones (five seconds) stop the recording, while a motor restart, the storage reserve and write failures stay fatal.
+- **Every overlapping poll counted as a missed deadline.** The poller fires every 100 ms and a round trip takes ~160 ms, so a healthy 40 s probe that captured 235 samples reported "165 sample deadlines were missed" and the state incomplete. The finished state now follows the achieved rate against a 4 Hz floor, and the manifest carries `sampling_fps_achieved`.
+- **Starting a recording required a motion-grade observation**, refusing about half the starts. `freshObservation` is now `recentObservation(250)` and starting a recording accepts one under a second.
+
+After the three fixes a 30 s probe reported `captured`, 141 frames, 4.5 Hz. Around 6 Hz is the ceiling: one sample per round trip. MP4 export is unaffected (it picks nearest frames), but LeRobot **dataset** export refuses gaps over 250 ms, so these recordings are for replay, not training.
