@@ -550,7 +550,7 @@ def test_leader_mode_follows_the_leader_at_the_speed_limit_and_owns_motion(rig):
 def test_leader_target_outside_the_commissioned_range_latches_a_fault(rig):
     e, c = rig
     e.acquire("teleop", mode="leader")
-    lo, hi = e.profile["limits"]["shoulder_pan"]
+    _, hi = e.profile["limits"]["shoulder_pan"]
     e.leader = FakeLeader({**e.commanded, "shoulder_pan": hi + 5})
     before = e.commanded.copy()
     c.advance(1 / 30)
