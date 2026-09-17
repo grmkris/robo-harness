@@ -175,7 +175,24 @@ const skillConfigFor = (
   limits: obs.limits,
 });
 
+const blind: WristView = {
+  visible: false,
+  x: null,
+  y: null,
+  size: 0,
+  background: false,
+};
+let lastLook = { at: 0, view: blind };
+
+/**
+ * The Pi encodes both camera streams, runs the 30 Hz motor loop and throttles
+ * thermally, so perception is capped: at most one wrist frame per 400 ms, and
+ * the previous view is reused in between.
+ */
 const lookWrist = async (): Promise<WristView> => {
+  if (performance.now() - lastLook.at < 400) {
+    return lastLook.view;
+  }
   try {
     const detection = whiteBlob(await robot.capture("wrist"));
     const x = detection["center_x"];
@@ -184,7 +201,8 @@ const lookWrist = async (): Promise<WristView> => {
       detection["visible"] === true &&
       typeof x === "number" &&
       typeof y === "number";
-    return {
+    lastLook = { at: performance.now(), view: blind };
+    const view = {
       visible,
       x: visible ? x : null,
       y: visible ? y : null,
@@ -194,8 +212,11 @@ const lookWrist = async (): Promise<WristView> => {
           : 0,
       background: detection["background"] === true,
     };
+    lastLook = { at: performance.now(), view };
+    return view;
   } catch {
-    return { visible: false, x: null, y: null, size: 0, background: false };
+    lastLook = { at: performance.now(), view: blind };
+    return blind;
   }
 };
 

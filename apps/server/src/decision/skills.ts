@@ -295,7 +295,9 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
     for (let i = 0; i < 40; i += 1) {
       const step = await stepToward(ctx, obs, { shoulder_pan: goalPan });
       obs = step.obs;
-      if (await check()) {
+      // Looking after every move overloads the Pi; every second move is enough
+      // at 1.6 degrees per move.
+      if ((i % 2 === 1 || step.reached) && (await check())) {
         return result(
           "scan_for_piece",
           "done",
