@@ -53,6 +53,9 @@ test("the blob centre and box are image offsets of the bright piece", () => {
   expect(detection["center_x"]).toBeCloseTo(-0.375, 1);
   expect(detection["center_y"]).toBeCloseTo(0.5, 1);
   expect(whiteBlob(frame("wrist", null))["visible"]).toBe(false);
+  const table = whiteBlob(frame("wrist", [480, 0, 640, 480]));
+  expect(table["visible"]).toBe(false);
+  expect(table["background"]).toBe(true);
 });
 
 test("scene replies are parsed strictly and failures stay short", async () => {

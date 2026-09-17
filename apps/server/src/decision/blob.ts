@@ -11,9 +11,16 @@ export interface BlobOptions {
   readonly stride: number;
   /** Minimum sampled pixels for a detection. */
   readonly minPixels: number;
+  /** Bright regions spanning at least this fraction of the frame width or height are background. */
+  readonly maxSpan: number;
 }
 
-const defaults: BlobOptions = { minBrightness: 130, stride: 4, minPixels: 12 };
+const defaults: BlobOptions = {
+  minBrightness: 130,
+  stride: 4,
+  minPixels: 12,
+  maxSpan: 0.8,
+};
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
 
@@ -59,7 +66,12 @@ export const whiteBlob = (
       }
     }
   }
-  const visible = count >= settings.minPixels;
+  // A bright region spanning most of the frame is the white table or wall,
+  // not a 2-3 cm piece; report it as background instead of a detection.
+  const spanX = count > 0 ? (right - left) / image.width : 0;
+  const spanY = count > 0 ? (bottom - top) / image.height : 0;
+  const background = spanX >= settings.maxSpan || spanY >= settings.maxSpan;
+  const visible = count >= settings.minPixels && !background;
   const nx = (x: number) => round((x / image.width) * 2 - 1);
   const ny = (y: number) => round((y / image.height) * 2 - 1);
   return {
@@ -79,6 +91,7 @@ export const whiteBlob = (
         top <= settings.stride ||
         right >= image.width - settings.stride * 2 ||
         bottom >= image.height - settings.stride * 2),
+    background,
     frame: "image pixels, uncalibrated",
   };
 };
