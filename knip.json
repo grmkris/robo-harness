@@ -11,11 +11,17 @@
       ],
       "project": ["scripts/**/*.{ts,mjs}", "tools/**/*.ts"]
     },
-    "apps/server": { "entry": ["src/main.ts", "test/*.test.ts"] },
-    "apps/cli": { "entry": ["src/main.ts", "src/mcp.ts"] },
+    "apps/server": {
+      "entry": ["src/main.ts", "test/*.test.ts"]
+    },
+    "apps/cli": {
+      "entry": ["src/main.ts", "src/mcp.ts", "src/jev.ts"]
+    },
     "apps/web": {},
     "packages/domain": {},
-    "packages/protocol": { "entry": ["src/index.ts", "test/*.test.ts"] },
+    "packages/protocol": {
+      "entry": ["src/index.ts", "test/*.test.ts"]
+    },
     "python": {}
   }
 }

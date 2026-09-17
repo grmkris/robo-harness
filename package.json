@@ -23,7 +23,8 @@
     "cli": "bun apps/cli/src/main.ts",
     "mcp": "bun apps/cli/src/mcp.ts",
     "graph": "bun tools/check-graph.ts",
-    "hooks:install": "lefthook install"
+    "hooks:install": "lefthook install",
+    "jev": "bun apps/cli/src/jev.ts"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.2",
