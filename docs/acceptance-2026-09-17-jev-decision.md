@@ -79,3 +79,30 @@ Three separate faults, each of which made a recording useless:
 - **Starting a recording required a motion-grade observation**, refusing about half the starts. `freshObservation` is now `recentObservation(250)` and starting a recording accepts one under a second.
 
 After the three fixes a 30 s probe reported `captured`, 141 frames, 4.5 Hz. Around 6 Hz is the ceiling: one sample per round trip. MP4 export is unaffected (it picks nearest frames), but LeRobot **dataset** export refuses gaps over 250 ms, so these recordings are for replay, not training.
+
+## Unattended recorded pickup attempts
+
+The operator authorised up to three unattended attempts and one stream test, with the rule that anything unexpected stops and reports rather than retries.
+
+**Attempt 1** (rules, recorded `e9003ad5`): ended after five moves with `skill_aborted: move cancelled: Motion cancelled: Control loop deadline missed`, recording 39 frames. Cause was the Pi load above, now fixed.
+
+**Attempt 2** (rules, recorded `5816a735`, 438 s, `end_reason: max_seconds`): the search swept all three arcs and never saw the piece. Recording captured 2355 samples at 4.85 Hz with a 27 MB MP4, and both cameras stayed fresh the whole run (1984 unique wrist frames, two 1.7 s hiccups) — so the search was blind, not broken.
+
+It was blind because **the arm never rose**. `shoulder_lift` is unresolved in 30 of the 34 multi-joint moves, including the first 17, which were the climb to the vantage height. The sweep therefore ran at 3.5 cm above the mat, where the wrist camera covers about a hand's width, while the piece sat some 20 cm away. A mid-run wrist frame shows the white table and a cable; the overhead frame shows the gripper still over the table edge with the piece far out on the mat.
+
+Underneath that, **every joint settles about 0.7° short of each 1.6° step** — 152 of 209 single-joint pan moves are marked failed at a 0.8° tolerance while still moving ~0.9°, which is why the partial-progress rule let the sweep continue at all.
+
+### What the stream test says about it
+
+Stream mode ([0012](decisions/0012-stream-mode.md)) was built and deployed for exactly this, since a command that leads the measured position accumulates the error a re-planned step never can. Measured at 10.07 Hz on the Pi, 5.2 ms round trip, one joint out and back over 12 s:
+
+| Joint           | Setpoint | Travelled | Residual out | Residual back |
+| --------------- | -------- | --------- | ------------ | ------------- |
+| `wrist_flex`    | −3°      | −1.58°    | 1.42°        | 0.088°        |
+| `shoulder_lift` | −3°      | −1.32°    | 1.68°        | 0.088°        |
+
+So the lead does move a joint that bounded steps could not budge — `shoulder_lift` went nowhere under stepped 1.6° commands — and the loaded direction still reaches equilibrium about 1.5° short, while the unloaded return lands within 0.09°. Two degrees of lead against these P gains is all the torque there is.
+
+The arm is not out of reach: the model finds top-down solutions from 0.10 m to 0.35 m radius at both grasp and scan height. **The blocker is gain, not geometry, not the control path and not the model.** The next step is a `servo_step_trace.py` sweep of `shoulder_lift` (and `elbow_flex`) at P 48/64/96 under this load, then a profile change — which needs the operator, since P gains are not changed unattended.
+
+The third attempt was not used: the same configuration would fail the same way.
