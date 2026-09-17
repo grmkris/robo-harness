@@ -151,3 +151,72 @@ def test_device_camera_read_failure_recovers(monkeypatch):
     assert len(opened) >= 2, "should have reopened the device after a read failure"
     assert cams.get("workspace")["camera"] == "workspace"
     assert "workspace" not in cams.errors  # cleared once a frame succeeded
+
+
+def test_lab_frames_are_encoded_only_when_fetched(monkeypatch):
+    """Encoding every captured frame starved the motor loop on lab-pi."""
+    encodes = []
+    state = {"seq": 0}
+
+    def make_source(name):
+        state["seq"] += 1
+        seq = state["seq"]
+
+        def jpeg(quality):
+            encodes.append(seq)
+            return f"jpeg-{seq}".encode()
+
+        return SimpleNamespace(
+            seq=seq,
+            mono_ts=time.monotonic(),
+            wall_ts=time.time(),
+            bgr=np.zeros((2, 3, 3)),
+            repeat=False,
+            jpeg=jpeg,
+            name=name,
+        )
+
+    class Owner:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def latest(self, name, max_age_ms):
+            return make_source(name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "lab_cameras", SimpleNamespace(CameraOwner=Owner))
+    cameras = Cameras({"camera_mode": "lab", "camera_devices": {}}, "device-boot")
+    try:
+        deadline = time.monotonic() + 2
+        while cameras.status()["workspace"]["seq"] < 12:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        # A dozen captures, none fetched: nothing has been encoded.
+        assert encodes == []
+        frame = cameras.get("workspace")
+        assert base64.b64decode(frame["base64"]) == f"jpeg-{frame['seq']}".encode()
+        assert encodes == [frame["seq"]]
+        # Refetching by id reuses the cached payload; the raw frame is released.
+        again = cameras.get("workspace", frame["id"])
+        assert again["base64"] == frame["base64"]
+        assert "_source" not in again
+        assert encodes == [frame["seq"]]
+        # A frame nobody fetched is no longer encodable once it ages out.
+        deadline = time.monotonic() + 2
+        while cameras.status()["workspace"]["seq"] < frame["seq"] + 10:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        stale_id = next(
+            f["id"]
+            for f in cameras.history.values()
+            if f["camera"] == "workspace" and f["seq"] > frame["seq"]
+        )
+        with pytest.raises(ValueError, match="unavailable or has expired"):
+            cameras.get("workspace", stale_id)
+    finally:
+        cameras.close()

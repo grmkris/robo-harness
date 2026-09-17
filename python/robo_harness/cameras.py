@@ -13,6 +13,11 @@ from PIL import Image, ImageDraw
 
 # Retain at most this many recent frames across all cameras for replay-by-id lookups.
 HISTORY_LIMIT = 240
+# Frames are JPEG-encoded only when a consumer asks for one. Encoding all 60
+# captured frames per second cost about half a core on lab-pi and starved the
+# 30 Hz motor loop into "Control loop deadline missed" (2026-09-17). A raw
+# frame is ~0.9 MB, so only this many stay encodable.
+RAW_LIMIT = 6
 # A live frame older than this many milliseconds is considered stale.
 STALE_AGE_MS = 500
 
@@ -63,16 +68,15 @@ class Cameras:
                     "width": source.bgr.shape[1],
                     "height": source.bgr.shape[0],
                     "media_type": "image/jpeg",
-                    "base64": base64.b64encode(source.jpeg(quality=80)).decode(),
                     "repeat": source.repeat,
                     "calibration": self.profile.get("camera_calibrations", {}).get(name),
+                    "_source": source,
                 }
                 with self.lock:
                     self.seq[name] = source.seq
                     self.frames[name] = frame
                     self.history[frame["id"]] = frame
-                    while len(self.history) > HISTORY_LIMIT:
-                        self.history.popitem(last=False)
+                    self._trim()
                     self.errors.pop(name, None)
             except Exception as e:
                 with self.lock:
@@ -175,8 +179,7 @@ class Cameras:
                 with self.lock:
                     self.frames[name] = frame
                     self.history[frame["id"]] = frame
-                    while len(self.history) > HISTORY_LIMIT:
-                        self.history.popitem(last=False)
+                    self._trim()
                     self.errors.pop(name, None)
         except Exception as e:
             with self.lock:
@@ -185,15 +188,34 @@ class Cameras:
             if cap:
                 cap.release()
 
+    def _trim(self) -> None:
+        """Bound history, and keep raw frames only for the newest few."""
+        while len(self.history) > HISTORY_LIMIT:
+            self.history.popitem(last=False)
+        raw = [f for f in reversed(self.history.values()) if "_source" in f]
+        for f in raw[RAW_LIMIT:]:
+            f.pop("_source", None)
+
     def get(self, name: str, frame_id: str | None = None) -> dict[str, Any]:
         with self.lock:
             f = self.history.get(frame_id) if frame_id else self.frames.get(name)
             if not f or f["camera"] != name:
                 raise ValueError("Camera frame is unavailable or has expired")
-            out = {**f, "age_ms": (time.monotonic() - f["monotonic_s"]) * 1000}
-        if not frame_id and out["age_ms"] > STALE_AGE_MS:
+            age_ms = (time.monotonic() - f["monotonic_s"]) * 1000
+            payload, source = f.get("base64"), f.get("_source")
+        if not frame_id and age_ms > STALE_AGE_MS:
             raise ValueError("Camera is stale")
-        return out
+        if payload is None:
+            if source is None:
+                # Encodable only while the raw frame is retained; an older
+                # frame nobody fetched is gone, like one evicted from history.
+                raise ValueError("Camera frame is unavailable or has expired")
+            # Encoding stays off the lock: it takes ~7 ms per frame on the Pi.
+            payload = base64.b64encode(source.jpeg(quality=80)).decode()
+            with self.lock:
+                f["base64"] = payload
+                f.pop("_source", None)
+        return {**{k: v for k, v in f.items() if not k.startswith("_")}, "age_ms": age_ms}
 
     def status(self) -> dict[str, dict[str, Any]]:
         with self.lock:
