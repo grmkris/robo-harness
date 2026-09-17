@@ -75,3 +75,22 @@ def test_recovery_rejects_large_or_out_of_range_targets(target):
         configure_follower_with_hold(bus, {"shoulder_pan": target})
     assert "on" not in bus.events
     assert not any(isinstance(e, tuple) and e[0] == "goal" for e in bus.events)
+
+
+def test_profile_p_coefficients_override_the_default_per_joint():
+    bus = Bus()
+    configure_follower_with_hold(bus, p_coefficients={"shoulder_pan": 32})
+    gains = {
+        e[2]: e[3] for e in bus.events if isinstance(e, tuple) and e[0] == "write" and e[1] == "P_Coefficient"
+    }
+    assert gains == {"shoulder_pan": 32, "gripper": 16}
+
+
+@pytest.mark.parametrize(
+    "bad", [{"elbow": 32}, {"shoulder_pan": 200}, {"shoulder_pan": 32.0}, {"shoulder_pan": True}]
+)
+def test_invalid_p_coefficients_fail_before_torque_changes(bad):
+    bus = Bus()
+    with pytest.raises(ValueError, match="p_coefficients"):
+        configure_follower_with_hold(bus, p_coefficients=bad)
+    assert bus.events == []

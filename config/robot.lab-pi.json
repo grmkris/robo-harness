@@ -36,9 +36,17 @@
   },
   "camera_calibrations": {},
   "hold_mode": "commanded",
-  "profile_review": "2026-09-06: user confirmed clear workspace and powered activation. Calibration recovered from both motor buses without changing calibration registers. Initial joint control only, <=2 degrees/percent and <=2 units/s; inherited lab URDF for visualization, Cartesian geometry not commissioned.",
+  "profile_review": "2026-09-06: user confirmed clear workspace and powered activation. Calibration recovered from both motor buses without changing calibration registers. Initial joint control only, <=2 degrees/percent and <=2 units/s; inherited lab URDF for visualization, Cartesian geometry not commissioned. 2026-09-17: position gain P=32 on the five arm joints (gripper stays 16) after scripts/servo_step_trace.py showed LeRobot's P=16 dead band (wrist_flex 0.00 of 1.8 deg at 16 vs 1.41 at 32; supply 4.7-5.3 V).",
   "leader_id": "arm",
   "leader_calibration_dir": "/home/kris/robo-harness/calibration/leader",
   "camera_session_path": "/home/kris/robo-harness/var/camera-session.json",
-  "cartesian_reviewed": false
+  "cartesian_reviewed": false,
+  "p_coefficients": {
+    "shoulder_pan": 32,
+    "shoulder_lift": 32,
+    "elbow_flex": 32,
+    "wrist_flex": 32,
+    "wrist_roll": 32,
+    "gripper": 16
+  }
 }

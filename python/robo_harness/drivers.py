@@ -26,17 +26,40 @@ class MockDriver:
         pass
 
 
-def configure_follower_with_hold(bus: Any, recovery_targets: dict[str, int] | None = None) -> None:
+DEFAULT_P_COEFFICIENT = 16  # LeRobot's SO-101 follower value (firmware default 32).
+P_COEFFICIENT_RANGE = (8, 64)
+
+
+def configure_follower_with_hold(
+    bus: Any,
+    recovery_targets: dict[str, int] | None = None,
+    p_coefficients: dict[str, int] | None = None,
+) -> None:
     """LeRobot 0.6 follower settings, with a current-position goal before torque.
 
     A configuration failure leaves torque disabled. The standard context manager
     can re-enable it even when configuration raises, so use explicit sequencing.
+
+    `p_coefficients` overrides the position gain per joint. LeRobot's 16 leaves a
+    dead band where a small step cannot overcome friction and gravity (measured
+    2026-09-17: wrist_flex moved 0.00 of 1.8 deg at 16, 1.41 deg at 32).
     """
+    gains = dict.fromkeys(bus.motors, DEFAULT_P_COEFFICIENT)
+    for motor, value in (p_coefficients or {}).items():
+        low, high = P_COEFFICIENT_RANGE
+        if (
+            motor not in gains
+            or isinstance(value, bool)
+            or not isinstance(value, int)
+            or not low <= value <= high
+        ):
+            raise ValueError(f"p_coefficients[{motor!r}] must be an integer {low}..{high} for a known motor")
+        gains[motor] = value
     bus.disable_torque()
     bus.configure_motors()
     for motor in bus.motors:
         bus.write("Operating_Mode", motor, 0)  # Feetech POSITION mode.
-        bus.write("P_Coefficient", motor, 16)
+        bus.write("P_Coefficient", motor, gains[motor])
         bus.write("I_Coefficient", motor, 0)
         bus.write("D_Coefficient", motor, 32)
         if motor == "gripper":
@@ -110,7 +133,7 @@ class LeRobotDriver:
                         raise ValueError(
                             "Motor calibration is missing or mismatched; restore it before activation"
                         )
-                    configure_follower_with_hold(self.bus)
+                    configure_follower_with_hold(self.bus, p_coefficients=profile.get("p_coefficients"))
 
             self.robot = CurrentHoldFollower(cfg)
         try:
