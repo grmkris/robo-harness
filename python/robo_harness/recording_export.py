@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from .dataset import export_recording, resample
 from .kinematics import JOINTS
 
-MAX_DURATION_S = 300
+MAX_DURATION_S = 900  # a supervised pickup runs up to 12 minutes
 MIN_EPISODE_SAMPLES = 2
 CAMERA_WIDTH = 640
 MAX_CAMERA_SKEW_MS = 150
@@ -40,7 +40,7 @@ def select_samples(samples: list[dict[str, Any]], selection: dict[str, Any]) -> 
     start = float(selection.get("start_s", 0))
     end = float(selection.get("end_s", relative[-1]))
     if start < 0 or end <= start or end > relative[-1] + 0.101 or end - start > MAX_DURATION_S:
-        raise ValueError("Choose an interval within the recording, up to 300 seconds")
+        raise ValueError(f"Choose an interval within the recording, up to {MAX_DURATION_S} seconds")
     selected = [row for row, at in zip(samples, relative, strict=True) if start <= at <= end]
     if len(selected) < MIN_EPISODE_SAMPLES:
         raise ValueError("Selected interval needs at least two frames")

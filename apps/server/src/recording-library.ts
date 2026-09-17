@@ -83,6 +83,9 @@ export const inspectRecording = async (
             event.type === "chat.steer" ||
             event.type === "chat.message" ||
             event.type === "control.stopped" ||
+            event.type === "decision.stage_reached" ||
+            event.type === "decision.task_failed" ||
+            event.type === "decision.finished" ||
             event.type.endsWith(".error")
         )
         .slice(-200)
@@ -96,7 +99,11 @@ export const inspectRecording = async (
           ),
           type: event.type,
           text: String(
-            event.data["text"] ?? event.data["message"] ?? event.type
+            event.data["text"] ??
+              event.data["message"] ??
+              event.data["phase"] ??
+              event.data["end_reason"] ??
+              event.type
           ).slice(0, 500),
         }))
     : [];
