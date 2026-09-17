@@ -147,7 +147,9 @@ const classify = (error: unknown): DecideFailure => {
   }
   if (
     status === 402 ||
-    /insufficient|credit|payment|billing|funds/iu.test(`${type} ${message}`)
+    /insufficient|credit|payment|billing|funds|free tier|upgrade your plan/iu.test(
+      `${type} ${message}`
+    )
   ) {
     return new DecideFailure("billing", message);
   }
@@ -189,6 +191,13 @@ interface EvaluateOutcome {
   readonly model: string;
 }
 
+/**
+ * Zero data retention is a Pro/Enterprise Gateway feature; on Hobby the request
+ * is refused. The state sent is joint telemetry and pixel offsets, never
+ * images, so it is opt-in via ROBO_JEV_ZDR=1.
+ */
+const zeroDataRetention = () => process.env["ROBO_JEV_ZDR"] === "1";
+
 export type Evaluator = (request: EvaluateRequest) => Promise<EvaluateOutcome>;
 
 export interface EvaluatorOptions {
@@ -223,7 +232,9 @@ export const jevEvaluator =
           questions: request.questions,
           maxRetries: 0,
           abortSignal: AbortSignal.any([signal, request.signal]),
-          providerOptions: { gateway: { zeroDataRetention: true } },
+          providerOptions: {
+            gateway: { zeroDataRetention: zeroDataRetention() },
+          },
         }),
       catch: (error) => error,
     }).pipe(
