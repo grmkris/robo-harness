@@ -41,16 +41,25 @@ export interface SkillConfig {
   /** Where the piece appears in the wrist image when it sits between the jaws. */
   readonly graspPoint: { readonly x: number; readonly y: number };
   readonly centerTolerance: number;
+  /** Tip step the centring trial takes before judging the image. */
+  readonly centerStepM: number;
   /** Model gripper-frame z when the jaw tips touch the mat. */
   readonly matZ: number;
   /** Tip height above the mat at which the gripper closes. */
   readonly graspHeightM: number;
-  /** Minimum tip height for sweeping. */
+  /** Tip height the search rises to before sweeping. */
   readonly scanHeightM: number;
+  /** Tip clearance below which a sweep would drag across the mat. */
+  readonly sweepClearanceM: number;
   readonly liftM: number;
   readonly openPercent: number;
   readonly heldPercent: number;
-  readonly scanPanOffsets: readonly number[];
+  /** Half-width of the pan sweep, in degrees either side of the start heading. */
+  readonly scanPanSpanDeg: number;
+  /** How much further out each successive sweep reaches. */
+  readonly scanReachStepM: number;
+  /** How many arcs the search sweeps before giving up. */
+  readonly scanArcs: number;
   readonly limits: Readonly<Record<string, readonly [number, number]>>;
   /** Per-move joint cap, below the motor owner's max_step. */
   readonly moveCapDeg: number;
@@ -59,31 +68,31 @@ export interface SkillConfig {
 export const skillDefaults = {
   graspPoint: { x: -0.16, y: 0.09 },
   centerTolerance: 0.06,
+  centerStepM: 0.012,
   matZ: -0.044,
   graspHeightM: 0.012,
-  scanHeightM: 0.05,
+  scanHeightM: 0.1,
+  sweepClearanceM: 0.03,
   liftM: 0.05,
   openPercent: 60,
   heldPercent: 4,
-  scanPanOffsets: [12, -12, 24, -24, 36, -36, 48, -48, 60, -60],
+  scanPanSpanDeg: 45,
+  scanReachStepM: 0.07,
+  scanArcs: 3,
   moveCapDeg: 1.6,
 } as const;
 
 /** What skills learn and remember across the run. */
 export interface SkillMemory {
-  /** Image offset per metre of tip motion in base x/y, measured at `jacobianHeightM`. */
-  jacobian:
-    | readonly [readonly [number, number], readonly [number, number]]
-    | null;
-  jacobianHeightM: number | null;
+  /** The tip direction that last brought the piece closer in the image. */
+  centerDirection: Vec3 | null;
   contact: boolean;
   lastSeen: WristView | null;
   movesUsed: number;
 }
 
 export const newMemory = (): SkillMemory => ({
-  jacobian: null,
-  jacobianHeightM: null,
+  centerDirection: null,
   contact: false,
   lastSeen: null,
   movesUsed: 0,
@@ -269,16 +278,8 @@ const result = (
 ): SkillResult => ({ skill, result: kind, detail, moves, imageMoved });
 
 const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
-  let obs = await ctx.observe();
-  if (heightAboveMat(obs, ctx.config) < ctx.config.scanHeightM) {
-    return result(
-      "scan_for_piece",
-      "vetoed",
-      "tip too low to sweep; lift first",
-      0
-    );
-  }
   const startMoves = ctx.memory.movesUsed;
+  let obs = await ctx.observe();
   let seen = 0;
   const check = async () => {
     const view = await ctx.look(obs);
@@ -286,17 +287,85 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
     seen = view.visible ? seen + 1 : 0;
     return seen >= 2 || (view.visible && centered(view, ctx.config, 3));
   };
-  if (await check())
+  if (await check()) {
     return result("scan_for_piece", "done", "piece already in view", 0);
+  }
+  // The wrist camera sits above the fingertips and looks along them, so a
+  // hover a few centimetres over the mat covers only about a hand's width of
+  // it. Rise first: at the scan height one arc covers roughly 20 cm of mat.
+  const climb = ctx.config.scanHeightM - heightAboveMat(obs, ctx.config);
+  if (climb > 0.01) {
+    const up = await moveTip(ctx, [0, 0, climb], 24);
+    obs = up.obs;
+    if (
+      up.vetoed &&
+      heightAboveMat(obs, ctx.config) < ctx.config.scanHeightM / 2
+    ) {
+      return result(
+        "scan_for_piece",
+        "vetoed",
+        `cannot rise to sweep: ${up.vetoed}`,
+        ctx.memory.movesUsed - startMoves
+      );
+    }
+    if (await check()) {
+      return result(
+        "scan_for_piece",
+        "done",
+        "piece seen while rising",
+        ctx.memory.movesUsed - startMoves
+      );
+    }
+  }
+  // A serpentine raster: sweep the pan arc, step the reach outward, sweep
+  // back. Each arc is one continuous pan traversal, so the search costs a
+  // sweep per arc rather than a return trip per look position.
   const startPan = obs.measured.shoulder_pan;
-  for (const offset of ctx.config.scanPanOffsets) {
-    const [low, high] = ctx.config.limits["shoulder_pan"] ?? [-110, 110];
-    const goalPan = Math.min(high - 2, Math.max(low + 2, startPan + offset));
-    for (let i = 0; i < 40; i += 1) {
+  const [low, high] = ctx.config.limits["shoulder_pan"] ?? [-110, 110];
+  const arcPan = (sign: number) =>
+    Math.min(
+      high - 2,
+      Math.max(low + 2, startPan + sign * ctx.config.scanPanSpanDeg)
+    );
+  let sign = obs.measured.shoulder_pan <= startPan ? 1 : -1;
+  for (let arc = 0; arc < ctx.config.scanArcs; arc += 1) {
+    if (arc > 0) {
+      // Step outward along the current heading, so successive arcs cover
+      // rings of mat at increasing distance from the base.
+      const [x, y] = position(tipFrame(obs.measured));
+      const radius = Math.hypot(x, y);
+      const step = ctx.config.scanReachStepM;
+      const out = await moveTip(
+        ctx,
+        radius < 0.01
+          ? [step, 0, 0]
+          : [(x / radius) * step, (y / radius) * step, 0],
+        24
+      );
+      obs = out.obs;
+      if (out.vetoed) {
+        return result(
+          "scan_for_piece",
+          "lost",
+          `swept ${arc} arcs; cannot reach further out: ${out.vetoed}`,
+          ctx.memory.movesUsed - startMoves
+        );
+      }
+      if (await check()) {
+        return result(
+          "scan_for_piece",
+          "done",
+          `piece seen stepping out on arc ${arc}`,
+          ctx.memory.movesUsed - startMoves
+        );
+      }
+    }
+    const goalPan = arcPan(sign);
+    for (let i = 0; i < 80; i += 1) {
       const step = await stepToward(ctx, obs, { shoulder_pan: goalPan });
       obs = step.obs;
-      // Looking after every move overloads the Pi; every second move is enough
-      // at 1.6 degrees per move.
+      // Looking after every move overloads the Pi, and two moves pan about
+      // 3 degrees -- far less than the camera's footprint.
       if ((i % 2 === 1 || step.reached) && (await check())) {
         return result(
           "scan_for_piece",
@@ -306,150 +375,136 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
         );
       }
       if (step.reached) break;
+      if (ctx.memory.movesUsed >= ctx.maxMoves) {
+        return result(
+          "scan_for_piece",
+          "stalled",
+          "search move budget used",
+          ctx.memory.movesUsed - startMoves
+        );
+      }
     }
+    sign = -sign;
   }
   return result(
     "scan_for_piece",
     "lost",
-    "swept the pan range without seeing the piece",
+    `swept ${ctx.config.scanArcs} arcs without seeing the piece`,
     ctx.memory.movesUsed - startMoves
   );
 };
 
+/**
+ * Bring the piece to the grasp point by trial: take a small step, keep it when
+ * the piece moved closer in the image, undo it when it did not. An estimated
+ * image Jacobian was tried first and was the fragile part -- one wrong sign or
+ * scale pushed the piece out of frame -- while a step that is judged by its own
+ * measured result cannot do that. The last direction that worked is tried
+ * first, so a straight approach still costs about one step per iteration.
+ */
 const runCenter = async (ctx: SkillContext): Promise<SkillResult> => {
   const startMoves = ctx.memory.movesUsed;
   let obs = await ctx.observe();
   let view = await ctx.look(obs);
-  if (!view.visible)
+  if (!view.visible) {
     return result("center_on_piece", "lost", "piece not visible", 0);
-  const firstOffset = offsetOf(view, ctx.config);
-  const height = heightAboveMat(obs, ctx.config);
-  const stale =
-    ctx.memory.jacobian === null ||
-    ctx.memory.jacobianHeightM === null ||
-    Math.abs(ctx.memory.jacobianHeightM - height) / Math.max(0.01, height) >
-      0.3;
-  if (stale) {
-    const columns: [number, number][] = [];
-    for (const axis of [0, 1] as const) {
-      const before = offsetOf(view, ctx.config);
-      const beforeTip = position(tipFrame(obs.measured));
-      const probe: Vec3 = axis === 0 ? [0.01, 0, 0] : [0, 0.01, 0];
-      const moved = await moveTip(ctx, probe, 6);
-      if (moved.vetoed)
-        return result(
-          "center_on_piece",
-          "vetoed",
-          `probe ${moved.vetoed}`,
-          ctx.memory.movesUsed - startMoves
-        );
-      obs = moved.obs;
-      view = await ctx.look(obs);
-      const after = offsetOf(view, ctx.config);
-      if (!before || !after)
-        return result(
-          "center_on_piece",
-          "lost",
-          "piece left the view while probing",
-          ctx.memory.movesUsed - startMoves
-        );
-      const afterTip = position(tipFrame(obs.measured));
-      const travelled = afterTip[axis] - beforeTip[axis];
-      if (Math.abs(travelled) < 0.004)
-        return result(
-          "center_on_piece",
-          "stalled",
-          "probe move did not travel",
-          ctx.memory.movesUsed - startMoves
-        );
-      columns.push([
-        (after.dx - before.dx) / travelled,
-        (after.dy - before.dy) / travelled,
-      ]);
-    }
-    const [cx, cy] = columns;
-    if (!cx || !cy)
-      return result(
-        "center_on_piece",
-        "failed",
-        "probe incomplete",
-        ctx.memory.movesUsed - startMoves
-      );
-    ctx.memory.jacobian = [
-      [cx[0], cy[0]],
-      [cx[1], cy[1]],
-    ];
-    ctx.memory.jacobianHeightM = heightAboveMat(obs, ctx.config);
   }
-  for (let i = 0; i < 10; i += 1) {
+  const firstOffset = offsetOf(view, ctx.config);
+  const size = (offset: { dx: number; dy: number } | null) =>
+    offset ? Math.hypot(offset.dx, offset.dy) : Number.POSITIVE_INFINITY;
+  const directions: readonly Vec3[] = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+  ];
+  let step = ctx.config.centerStepM;
+  for (let iteration = 0; iteration < 24; iteration += 1) {
     const offset = offsetOf(view, ctx.config);
-    if (!offset)
+    if (!offset) {
       return result(
         "center_on_piece",
         "lost",
         "piece left the view",
         ctx.memory.movesUsed - startMoves
       );
+    }
     if (centered(view, ctx.config)) {
-      const moved = firstOffset
-        ? round(
-            Math.hypot(offset.dx - firstOffset.dx, offset.dy - firstOffset.dy)
-          )
-        : null;
       return result(
         "center_on_piece",
         "done",
         "piece at the grasp point",
         ctx.memory.movesUsed - startMoves,
-        moved
+        firstOffset
+          ? round(
+              Math.hypot(offset.dx - firstOffset.dx, offset.dy - firstOffset.dy)
+            )
+          : null
       );
     }
-    const jac = ctx.memory.jacobian;
-    if (!jac)
-      return result(
-        "center_on_piece",
-        "failed",
-        "no image model",
-        ctx.memory.movesUsed - startMoves
-      );
-    const scale =
-      (ctx.memory.jacobianHeightM ?? height) /
-      Math.max(0.01, heightAboveMat(obs, ctx.config));
-    const [[a, b], [c, d]] = [
-      [jac[0][0] * scale, jac[0][1] * scale],
-      [jac[1][0] * scale, jac[1][1] * scale],
-    ];
-    const det = a * d - b * c;
-    if (Math.abs(det) < 1e-6)
+    if (ctx.memory.movesUsed >= ctx.maxMoves) {
       return result(
         "center_on_piece",
         "stalled",
-        "image model is singular",
+        "move budget used while centring",
         ctx.memory.movesUsed - startMoves
       );
-    let mx = (-(d * offset.dx - b * offset.dy) / det) * 0.7;
-    let my = (-(-c * offset.dx + a * offset.dy) / det) * 0.7;
-    const norm = Math.hypot(mx, my);
-    if (norm > 0.02) {
-      mx = (mx / norm) * 0.02;
-      my = (my / norm) * 0.02;
     }
-    const moved = await moveTip(ctx, [mx, my, 0], 8);
-    if (moved.vetoed)
-      return result(
-        "center_on_piece",
-        "vetoed",
-        moved.vetoed,
-        ctx.memory.movesUsed - startMoves
+    const preferred = ctx.memory.centerDirection;
+    const ordered = preferred
+      ? [preferred, ...directions.filter((d) => d !== preferred)]
+      : directions;
+    let improved = false;
+    for (const direction of ordered) {
+      const displacement: Vec3 = [direction[0] * step, direction[1] * step, 0];
+      const moved = await moveTip(ctx, displacement, 8);
+      obs = moved.obs;
+      if (moved.vetoed) continue;
+      view = await ctx.look(obs);
+      ctx.memory.lastSeen = view;
+      const after = offsetOf(view, ctx.config);
+      if (view.visible && size(after) < size(offset) - 0.005) {
+        ctx.memory.centerDirection = direction;
+        improved = true;
+        break;
+      }
+      // Undo: this direction made the image worse, or lost the piece.
+      const back = await moveTip(
+        ctx,
+        [-displacement[0], -displacement[1], 0],
+        8
       );
-    obs = moved.obs;
-    view = await ctx.look(obs);
-    ctx.memory.lastSeen = view;
+      obs = back.obs;
+      view = await ctx.look(obs);
+      ctx.memory.lastSeen = view;
+      if (!view.visible) {
+        return result(
+          "center_on_piece",
+          "lost",
+          "piece left the view and did not come back",
+          ctx.memory.movesUsed - startMoves
+        );
+      }
+      if (ctx.memory.centerDirection === direction) {
+        ctx.memory.centerDirection = null;
+      }
+    }
+    if (!improved) {
+      step /= 2;
+      if (step < ctx.config.centerStepM / 4) {
+        return result(
+          "center_on_piece",
+          "stalled",
+          `no step reduces the offset below ${round(size(offset))}`,
+          ctx.memory.movesUsed - startMoves
+        );
+      }
+    }
   }
   return result(
     "center_on_piece",
     "stalled",
-    "not centred after 10 corrections",
+    "not centred after 24 attempts",
     ctx.memory.movesUsed - startMoves
   );
 };

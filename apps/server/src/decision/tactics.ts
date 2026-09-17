@@ -27,7 +27,7 @@ const role =
 
 const NEXT_SKILL_OPTIONS: Readonly<Record<TacticChoice, string>> = {
   scan_for_piece:
-    "observed.piece.visible_wrist is false (the wrist camera cannot see the piece) and observed.tip.high_enough_to_sweep is true. Sweep the arm sideways to find the piece. Not useful when the piece is already visible.",
+    "observed.piece.visible_wrist is false (the wrist camera cannot see the piece) and observed.tip.high_enough_to_sweep is true. Search for the piece: the skill rises to a vantage height by itself and sweeps arcs of the mat at increasing distance from the base. Not useful when the piece is already visible.",
   center_on_piece:
     "The piece is visible (observed.piece.visible_wrist true) but observed.piece.centered is false: offset_x or offset_y is larger than about 0.06. Move the gripper so the piece sits at the grasp point. Also right after descend reports it drifted off centre.",
   open_gripper:

@@ -115,7 +115,7 @@ export const buildScene = (input: SceneInput): SceneState => {
       tip: {
         height_above_mat_cm: round(height * 100, 1),
         at_grasp_height: height <= config.graspHeightM + 0.006,
-        high_enough_to_sweep: height >= config.scanHeightM,
+        high_enough_to_sweep: height >= config.sweepClearanceM,
         lifted_with_piece:
           holding &&
           input.graspHeightReachedAtM !== null &&
