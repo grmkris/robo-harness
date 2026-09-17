@@ -27,24 +27,26 @@ const frame = (camera: string) => ({
   age_ms: 20,
   calibration: null,
 });
+const observation = () => {
+  if (state.stale) {
+    throw new Error("Robot observation is stale or unavailable");
+  }
+  return {
+    age_ms: 30,
+    boot_id: state.boot_id,
+    clock_domain: state.clock_domain,
+    monotonic_s: 10,
+    measured: {},
+    commanded: {},
+    limits: {},
+  };
+};
 mock.module("./robot", () => ({
   ApiError: class ApiError extends Error {},
+  recentObservation: () => observation(),
   clock: { offset_ms: 0, uncertainty_ms: 1, domain: "boot-1" },
   frames: () => ({ workspace: frame("workspace"), wrist: frame("wrist") }),
-  freshObservation: () => {
-    if (state.stale) {
-      throw new Error("Robot observation is stale or unavailable");
-    }
-    return {
-      age_ms: 30,
-      boot_id: state.boot_id,
-      clock_domain: state.clock_domain,
-      monotonic_s: 10,
-      measured: {},
-      commanded: {},
-      limits: {},
-    };
-  },
+  freshObservation: () => observation(),
 }));
 
 const recordings = await import("./recordings");

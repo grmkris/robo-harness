@@ -12,7 +12,13 @@ import { join } from "node:path";
 import type { AppEvent } from "@robo/domain";
 
 import { config } from "./config";
-import { freshObservation, frames, clock, ApiError } from "./robot";
+import {
+  freshObservation,
+  recentObservation,
+  frames,
+  clock,
+  ApiError,
+} from "./robot";
 import { db, emit } from "./store";
 
 export interface Recording {
@@ -68,7 +74,10 @@ export async function startRecording(label: string) {
   if (active) {
     throw new ApiError("A recording is already active");
   }
-  const obs = freshObservation();
+  // Starting a recording commands nothing, so it does not need a
+  // motion-grade observation; over the tailnet that gate refused half the
+  // starts (2026-09-17).
+  const obs = recentObservation(1000);
   const id = crypto.randomUUID();
   const path = join(config.dataDir, "recordings", id);
   const created = Date.now();

@@ -164,9 +164,14 @@ export async function sample() {
     emit("robot.fault", { message: current.fault });
   }
 }
-export function freshObservation() {
+/**
+ * The newest observation, refused past `maxAgeMs`. Authorizing motion uses the
+ * 250 ms gate the motor owner itself enforces; a caller that commands nothing
+ * can accept an older one, because the tailnet round trip alone is ~160 ms.
+ */
+export function recentObservation(maxAgeMs: number) {
   const elapsed = Math.max(0, performance.now() - observationReceived);
-  if (!current || current.age_ms + elapsed > 250 || robotError) {
+  if (!current || current.age_ms + elapsed > maxAgeMs || robotError) {
     throw new ApiError("Robot observation is stale or unavailable", 503);
   }
   return {
@@ -181,6 +186,7 @@ export function freshObservation() {
         : null,
   };
 }
+export const freshObservation = () => recentObservation(250);
 export async function capture(camera: string, frameId?: string) {
   return await io(
     `/frames/${encodeURIComponent(
