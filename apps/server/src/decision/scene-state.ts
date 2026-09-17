@@ -4,8 +4,10 @@ import { downness, tipFrame } from "./kinematics";
 import {
   centered,
   heightAboveMat,
+  JOINT_HISTORY,
   offsetOf,
   skillNames,
+  type JointMove,
   type SkillConfig,
   type SkillMemory,
   type SkillResult,
@@ -68,12 +70,65 @@ export interface SceneState {
       readonly moves_used: number;
       readonly moves_left: number;
     };
+    /** Per joint, from recent moves: does it go where it is sent? */
+    readonly joint_health: JointHealthMap;
   };
+}
+
+export interface JointHealth {
+  /** Achieved at least 60 % of what was commanded, over the recent moves. */
+  readonly follows: boolean;
+  /** Median shortfall between commanded and achieved, degrees. */
+  readonly lag_deg: number;
+  /** When it does not follow: the sign of the commands it failed, or null. */
+  readonly stalled_direction: "+" | "-" | null;
+  readonly moves: number;
 }
 
 const round = (value: number, places = 3) => {
   const f = 10 ** places;
   return Math.round(value * f) / f;
+};
+
+const median = (values: readonly number[]) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+};
+
+/**
+ * Judge each joint on its last few moves. A joint that follows its commands
+ * needs no thought; one that does not is the reason a skill is failing, and
+ * the tactician should know that before it retries.
+ */
+type JointHealthMap = Readonly<Record<string, JointHealth>>;
+
+export const jointHealth = (history: readonly JointMove[]) => {
+  const byJoint = new Map<string, JointMove[]>();
+  for (const move of history) {
+    const list = byJoint.get(move.joint) ?? [];
+    list.push(move);
+    byJoint.set(move.joint, list);
+  }
+  const judged = new Map<string, JointHealth>();
+  for (const [joint, moves] of byJoint) {
+    const recent = moves.slice(-JOINT_HISTORY);
+    const ratios = recent.map((m) => m.achievedDeg / m.commandedDeg);
+    const lags = recent.map((m) => Math.abs(m.commandedDeg - m.achievedDeg));
+    const follows = recent.length < 3 || median(ratios) >= 0.6;
+    const failed = recent.filter((m) => m.achievedDeg / m.commandedDeg < 0.6);
+    const upward = failed.filter((m) => m.commandedDeg > 0).length;
+    judged.set(joint, {
+      follows,
+      lag_deg: round(median(lags), 2),
+      stalled_direction: follows
+        ? null
+        : upward >= failed.length / 2
+          ? "+"
+          : "-",
+      moves: recent.length,
+    });
+  }
+  return Object.fromEntries(judged) satisfies JointHealthMap;
 };
 
 export interface SceneInput {
@@ -133,6 +188,7 @@ export const buildScene = (input: SceneInput): SceneState => {
         moves_used: memory.movesUsed,
         moves_left: Math.max(0, input.maxMoves - memory.movesUsed),
       },
+      joint_health: jointHealth(memory.jointHistory),
     },
   };
 };

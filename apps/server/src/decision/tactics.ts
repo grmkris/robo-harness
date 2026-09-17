@@ -41,7 +41,7 @@ const NEXT_SKILL_OPTIONS: Readonly<Record<TacticChoice, string>> = {
     "Something went wrong close to the mat: a close failed (last_skill.result failed with detail 'closed empty'), or the same skill keeps stalling (last_skill.repeats 2 or more) while the tip is low. Rise a few centimetres and reopen to try again.",
   hold: "Nothing useful can be done this moment, for example the last skill just changed the scene and a fresh look is needed.",
   done: "observed.tip.lifted_with_piece is true: the piece is held and raised. The task is complete.",
-  stop: "The task cannot be completed: observed.progress.moves_left is nearly 0, or scanning has failed repeatedly (last_skill scan_for_piece with result lost and repeats 1 or more).",
+  stop: "The task cannot be completed: observed.progress.moves_left is nearly 0, scanning has failed repeatedly (last_skill scan_for_piece with result lost and repeats 1 or more), or a joint in observed.joint_health has follows false while the last skill stalled or failed -- the arm cannot make the moves being asked of it and retrying will not change that.",
 };
 
 const QUESTIONS = {
@@ -129,6 +129,13 @@ export const rulesNext = (scene: SceneState): TacticChoice => {
   const { piece, gripper, tip, last_skill: last, progress } = scene.observed;
   if (tip.lifted_with_piece) return "done";
   if (progress.moves_left < 5) return "stop";
+  // A joint that no longer follows its commands is why the last skill
+  // stalled; asking again would spend the move budget on the same stall.
+  const stalledJoint = Object.values(scene.observed.joint_health).some(
+    (health) => !health.follows
+  );
+  if (stalledJoint && (last.result === "stalled" || last.result === "failed"))
+    return "stop";
   if (gripper.holding) return "lift";
   if (last.result === "failed" && last.detail === "closed empty")
     return "back_off";

@@ -83,9 +83,21 @@ export const skillDefaults = {
 } as const;
 
 /** What skills learn and remember across the run. */
+/** What one move asked of a joint and what the joint did. */
+export interface JointMove {
+  readonly joint: Joint;
+  readonly commandedDeg: number;
+  readonly achievedDeg: number;
+}
+
+/** How many recent joint moves the scene judges joint health on. */
+export const JOINT_HISTORY = 12;
+
 export interface SkillMemory {
   /** The tip direction that last brought the piece closer in the image. */
   centerDirection: Vec3 | null;
+  /** Recent per-joint commanded vs achieved motion, newest last. */
+  jointHistory: JointMove[];
   contact: boolean;
   lastSeen: WristView | null;
   movesUsed: number;
@@ -93,6 +105,7 @@ export interface SkillMemory {
 
 export const newMemory = (): SkillMemory => ({
   centerDirection: null,
+  jointHistory: [],
   contact: false,
   lastSeen: null,
   movesUsed: 0,
@@ -207,6 +220,22 @@ const stepToward = async (
     ...deltas.map(([joint]) =>
       Math.abs(after.measured[joint] - obs.measured[joint])
     )
+  );
+  // Remember what each joint was asked and what it did, so the scene can say
+  // which joints follow and which stall, and in which direction.
+  for (const [joint] of deltas) {
+    const commandedDeg =
+      (target[joint] ?? obs.measured[joint]) - obs.measured[joint];
+    if (Math.abs(commandedDeg) < 0.3) continue;
+    ctx.memory.jointHistory.push({
+      joint,
+      commandedDeg,
+      achievedDeg: after.measured[joint] - obs.measured[joint],
+    });
+  }
+  ctx.memory.jointHistory.splice(
+    0,
+    Math.max(0, ctx.memory.jointHistory.length - JOINT_HISTORY * joints.length)
   );
   return { obs: after, reached: false, progressed: moved >= 0.4, outcome };
 };
