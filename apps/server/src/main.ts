@@ -11,6 +11,18 @@ import { getCapability, sweepCapabilities } from "./capabilities";
 import { chatImage } from "./chat-images";
 import * as agent from "./chat-runs";
 import { config } from "./config";
+import { runFixtures, runSmoke } from "./decision/offline";
+import {
+  cancelDecisionRun,
+  closeDecisionRuns,
+  DecisionRunRequest,
+  decisionRuns,
+  previewDecision,
+  startDecisionRun,
+} from "./decision/runner";
+import { spendSummary } from "./decision/spend";
+import { strategyNames } from "./decision/strategies";
+import { TaskName } from "./decision/tasks";
 import { decode, isUuid, Uuid } from "./decode";
 import { budget, setBudget, perceptionConfig } from "./perception";
 import { perceptionHistory, perceptionDetail } from "./perception-history";
@@ -446,6 +458,62 @@ async function handle(req: Request): Promise<Response | undefined> {
         )
       );
     }
+    if (path === "/api/decision" && req.method === "GET") {
+      return json({
+        runs: decisionRuns(),
+        key_configured: Boolean(process.env["AI_GATEWAY_API_KEY"]),
+        spend: spendSummary(),
+      });
+    }
+    if (path === "/api/decision/observe" && req.method === "POST") {
+      const body = decode(
+        Schema.Struct({
+          task: TaskName.pipe(
+            Schema.withDecodingDefaultKey(
+              Effect.succeed("control-smoke" as const)
+            )
+          ),
+          goal: Schema.optionalKey(
+            Schema.String.check(Schema.isMaxLength(200))
+          ),
+        }),
+        await parse(req)
+      );
+      return json(await previewDecision(body.task, body.goal));
+    }
+    if (path === "/api/decision/smoke" && req.method === "POST") {
+      requireHuman(principal);
+      const body = decode(
+        Schema.Struct({ decider: Schema.Literals(["jev", "mock"]) }),
+        await parse(req)
+      );
+      return json(await runSmoke(body.decider));
+    }
+    if (path === "/api/decision/fixtures" && req.method === "POST") {
+      requireHuman(principal);
+      const body = decode(
+        Schema.Struct({
+          strategy: Schema.Literals(strategyNames),
+          decider: Schema.Literals(["jev", "mock"]),
+        }),
+        await parse(req)
+      );
+      return json(await runFixtures(body.strategy, body.decider, req.signal));
+    }
+    if (path === "/api/decision/runs" && req.method === "POST") {
+      requireHuman(principal);
+      return json(
+        await startDecisionRun(decode(DecisionRunRequest, await parse(req)))
+      );
+    }
+    if (path === "/api/decision/cancel" && req.method === "POST") {
+      requireHuman(principal);
+      return json(
+        cancelDecisionRun(
+          decode(Schema.Struct({ id: Schema.String }), await parse(req)).id
+        )
+      );
+    }
     if (path === "/api/chat/steer" && req.method === "POST") {
       requireHuman(principal);
       const b = decode(
@@ -701,6 +769,7 @@ export class App extends Context.Service<App, { readonly port: number }>()(
             agent.cancel(id);
           }
           await robot.stop().catch(() => {});
+          await closeDecisionRuns();
           await agent.closeChats();
           await terminals.closeAll();
           await closeExports();

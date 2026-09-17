@@ -3,11 +3,13 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@ai-sdk/provider": "4.0.17",
     "@effect/platform-bun": "4.0.0-rc.112",
     "@robo/domain": "workspace:*",
     "@robo/protocol": "workspace:*",
     "@tanstack/ai": "0.53.0",
     "@tanstack/ai-openai": "0.22.5",
+    "ai": "7.0.105",
     "effect": "4.0.0-rc.112",
     "openai": "6.49.0",
     "pngjs": "7.0.0"

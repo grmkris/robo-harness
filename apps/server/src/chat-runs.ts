@@ -7,6 +7,7 @@ import { saveChatImage } from "./chat-images";
 import { createChatTools } from "./chat-tools";
 import { agentControlSignal } from "./control-lifecycle";
 import { runChatLoop } from "./loop";
+import { activeDecisionRuns } from "./motion-executor";
 import { resolveModel } from "./providers";
 import { release, ApiError, current } from "./robot";
 import { db, emit } from "./store";
@@ -115,6 +116,9 @@ export async function startChat(
   // starts on the same id cannot both pass the guard.
   if (sessions.has(sessionId)) {
     throw new ApiError("Conversation is already running; steer or cancel it");
+  }
+  if (activeDecisionRuns.size > 0) {
+    throw new ApiError("A decision run is active; cancel it before chatting");
   }
   const settled = Promise.withResolvers<null>();
   const state: ChatSession = {

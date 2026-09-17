@@ -8,3 +8,6 @@ export const motionExecutor = createMotionExecutor(
   robot.motionIO,
   actionLedger
 );
+
+/** Decision runs currently allowed to submit motion; chat refuses to start while one runs. */
+export const activeDecisionRuns = new Set<string>();
