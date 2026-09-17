@@ -44,6 +44,15 @@ const markIncomplete = (record: Recording, message: string) => {
   emit("recording.error", { id: record.id, message });
 };
 const known = new Set<string>();
+// A recording is telemetry, not an admission decision: one stale observation
+// or camera hiccup must not end it. Over the tailnet the observation age sits
+// at 223 ms p95 against the 250 ms gate, which killed a recording within
+// seconds (2026-09-17). Only a miss that persists this many consecutive
+// samples -- five seconds at 10 Hz -- ends the recording.
+const MISS_LIMIT = 50;
+let consecutiveMisses = 0;
+/** A miss worth counting and retrying, as opposed to a reason to stop. */
+class TransientMiss extends Error {}
 export function noteMissedSample() {
   if (active?.state === "recording") {
     skipped++;
@@ -113,6 +122,7 @@ export async function startRecording(label: string) {
     ).run(id, label, "recording", path, created);
     known.clear();
     skipped = 0;
+    consecutiveMisses = 0;
     stopping = false;
     emit("recording.started", { id, label });
     return active;
@@ -132,7 +142,14 @@ export async function recordSample() {
   writing = true;
   const record = active;
   try {
-    const obs = freshObservation();
+    let obs: ReturnType<typeof freshObservation>;
+    try {
+      obs = freshObservation();
+    } catch (error) {
+      throw new TransientMiss(
+        error instanceof Error ? error.message : "Observation unavailable"
+      );
+    }
     const currentFrames = frames();
     const sampledAt = Date.now();
     const sampledClock = { ...clock };
@@ -150,7 +167,7 @@ export async function recordSample() {
         frame.age_ms > 500 ||
         frame.clock_domain !== obs.clock_domain
       ) {
-        throw new Error("Recording stopped: required camera unavailable");
+        throw new TransientMiss(`Camera ${name} is stale or unavailable`);
       }
       const filename = `${name}-${frame.id.replaceAll(/[^a-zA-Z0-9-]/g, "_")}.jpg`;
       if (!known.has(frame.id)) {
@@ -179,15 +196,27 @@ export async function recordSample() {
       })}\n`
     );
     record.frames++;
+    consecutiveMisses = 0;
     db.query("UPDATE recordings SET frames=? WHERE id=?").run(
       record.frames,
       record.id
     );
   } catch (error) {
-    markIncomplete(
-      record,
-      error instanceof Error ? error.message : "Recording failed"
-    );
+    if (error instanceof TransientMiss) {
+      skipped++;
+      consecutiveMisses++;
+      if (consecutiveMisses >= MISS_LIMIT) {
+        markIncomplete(
+          record,
+          `Recording stopped: ${error.message} for ${consecutiveMisses} consecutive samples`
+        );
+      }
+    } else {
+      markIncomplete(
+        record,
+        error instanceof Error ? error.message : "Recording failed"
+      );
+    }
   } finally {
     writing = false;
   }
