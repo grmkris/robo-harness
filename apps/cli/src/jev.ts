@@ -188,9 +188,23 @@ interface RecordingInfo {
 }
 
 const startRecording = async (label: string): Promise<RecordingInfo> => {
-  const recording = (await call("/api/tool/recording_start", {
-    label: label.slice(0, 120),
-  })) as { id: string };
+  // The coordinator refuses a cached observation older than 250 ms, which the
+  // tailnet feed often is; retry briefly instead of losing the run.
+  let recording: { id: string } | null = null;
+  let lastError = "";
+  for (let attempt = 0; attempt < 12 && !recording; attempt += 1) {
+    try {
+      recording = (await call("/api/tool/recording_start", {
+        label: label.slice(0, 120),
+      })) as { id: string };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      await Bun.sleep(400);
+    }
+  }
+  if (!recording) {
+    throw new Error(`recording_start failed: ${lastError}`);
+  }
   console.log(`recording ${recording.id}`);
   // Let the first camera samples land before motion starts.
   await Bun.sleep(1500);
