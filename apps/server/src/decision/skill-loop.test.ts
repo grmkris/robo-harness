@@ -129,7 +129,12 @@ const hover = {
 };
 const matPiece = (x: number, y: number): Vec3 => [x, y, config.matZ + 0.0125];
 
-const runWith = async (tactician: Tactician, piece: Vec3, maxSeconds = 120) => {
+const runWith = async (
+  tactician: Tactician,
+  piece: Vec3,
+  maxSeconds = 120,
+  placeBack = false
+) => {
   const sim = simulate(piece, hover);
   const events: { event: string; data: Record<string, unknown> }[] = [];
   const summary = await runSkillLoop(
@@ -146,6 +151,7 @@ const runWith = async (tactician: Tactician, piece: Vec3, maxSeconds = 120) => {
       maxMoves: 400,
       maxSeconds,
       maxJudgments: 60,
+      placeBack,
       signal: new AbortController().signal,
     }
   );
@@ -255,4 +261,21 @@ test("a skill stops at the run's wall-clock deadline instead of finishing its ow
   expect(first?.data["detail"]).toBe("run deadline reached");
   expect(summary.end_reason).toBe("max_seconds");
   expect(sim.moves()).toBeLessThan(20);
+});
+
+test("with place-back a completed pickup puts the piece down and rises again", async () => {
+  const { summary, events, sim } = await runWith(
+    rulesTactician(),
+    matPiece(0.2, 0.09),
+    120,
+    true
+  );
+  expect(summary.end_reason).toBe("done");
+  const place = events.find(
+    (e) => e.event === "skill_finished" && e.data["skill"] === "place"
+  );
+  expect(place?.data["result"]).toBe("done");
+  expect(sim.measured().gripper).toBeGreaterThanOrEqual(config.openPercent - 2);
+  const tip = sim.tips().at(-1)!;
+  expect(tip[2] - config.matZ).toBeGreaterThan(config.liftM - 0.01);
 });

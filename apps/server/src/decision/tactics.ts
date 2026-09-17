@@ -5,7 +5,7 @@ import {
   type Evaluator,
 } from "./jev";
 import type { SceneState } from "./scene-state";
-import type { SkillName } from "./skills";
+import type { skillNames } from "./skills";
 
 /**
  * The tactical layer: everything the decision model is asked lives in this
@@ -13,7 +13,8 @@ import type { SkillName } from "./skills";
  * Code decides when to ask, reuses answers for unchanged scenes, and keeps the
  * veto; the answers only choose which bounded skill runs next.
  */
-export type TacticChoice = SkillName | "done" | "stop";
+/** What a tactician may choose: the offered skills, never `place`. */
+export type TacticChoice = (typeof skillNames)[number] | "done" | "stop";
 
 export const THRESHOLDS = {
   /** risk score (0 clear .. 2 about to collide) above which code backs off instead. */

@@ -30,6 +30,7 @@ const { values: args } = parseArgs({
     status: { type: "boolean" },
     cancel: { type: "string" },
     supervised: { type: "boolean" },
+    "place-back": { type: "boolean" },
     mock: { type: "boolean" },
     task: { type: "string" },
     strategy: { type: "string" },
@@ -103,6 +104,7 @@ const runBody = (mode: "dry-run" | "execute") => ({
   ...(args.scene ? { scene: true } : {}),
   ...(args["scene-model"] ? { scene_model: args["scene-model"] } : {}),
   supervised: Boolean(args.supervised),
+  ...(args["place-back"] ? { place_back: true } : {}),
 });
 
 interface StreamEvent {

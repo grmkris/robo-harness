@@ -19,7 +19,11 @@ export const skillNames = [
   "back_off",
   "hold",
 ] as const;
-export type SkillName = (typeof skillNames)[number];
+/**
+ * `place` is not offered to the tactician: it undoes the mission, and exists
+ * so an unattended run can put the piece back for the next attempt.
+ */
+export type SkillName = (typeof skillNames)[number] | "place";
 
 export interface WristView {
   readonly visible: boolean;
@@ -732,6 +736,47 @@ const runClose = async (ctx: SkillContext): Promise<SkillResult> => {
   );
 };
 
+/** Put a held piece down where the arm is: lower to grasp height, open, rise. */
+const runPlace = async (ctx: SkillContext): Promise<SkillResult> => {
+  const startMoves = ctx.memory.movesUsed;
+  let obs = await ctx.observe();
+  for (let i = 0; i < 12; i += 1) {
+    const height = heightAboveMat(obs, ctx.config);
+    if (height <= ctx.config.graspHeightM + 0.006) break;
+    const moved = await moveTip(
+      ctx,
+      [0, 0, -Math.min(0.015, height - ctx.config.graspHeightM)],
+      8
+    );
+    obs = moved.obs;
+    if (moved.vetoed) {
+      return result(
+        "place",
+        "vetoed",
+        moved.vetoed,
+        ctx.memory.movesUsed - startMoves
+      );
+    }
+    if (!moved.reached && heightAboveMat(obs, ctx.config) > height - 0.003) {
+      break;
+    }
+  }
+  const opened = await goToward(
+    ctx,
+    { gripper: ctx.config.openPercent },
+    40,
+    2
+  );
+  ctx.memory.contact = false;
+  const rose = await runLift(ctx, ctx.config.liftM, "place");
+  return result(
+    "place",
+    opened.reached && rose.result === "done" ? "done" : "stalled",
+    `released at ${round(heightAboveMat(opened.obs, ctx.config) * 100)} cm; ${rose.detail}`,
+    ctx.memory.movesUsed - startMoves
+  );
+};
+
 const runLift = async (
   ctx: SkillContext,
   meters: number,
@@ -816,6 +861,9 @@ export const runSkill = async (
       }
       case "lift": {
         return await runLift(ctx, ctx.config.liftM, skill);
+      }
+      case "place": {
+        return await runPlace(ctx);
       }
       case "back_off": {
         const lifted = await runLift(ctx, 0.03, skill);

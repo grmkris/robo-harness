@@ -28,6 +28,8 @@ export interface SkillLoopOptions {
   readonly maxSeconds: number;
   readonly maxJudgments: number;
   readonly signal: AbortSignal;
+  /** After a completed pickup, put the piece back down so the next attempt can run. */
+  readonly placeBack?: boolean;
 }
 
 export interface SkillLoopSummary {
@@ -155,6 +157,32 @@ export const runSkillLoop = async (
     if (chosen === "done") {
       endReason = "done";
       complete = true;
+      if (options.placeBack && options.mode === "execute") {
+        deps.log("skill_started", { turn, skill: "place" });
+        const placed = await runSkill(
+          {
+            observe: deps.observe,
+            look: deps.look,
+            move: deps.move,
+            config: options.config,
+            memory,
+            maxMoves: options.maxMoves + 80,
+            deadlineMs: started + options.maxSeconds * 1000 + 90_000,
+            signal: options.signal,
+          },
+          "place"
+        );
+        counts.skills += 1;
+        deps.log("skill_finished", {
+          turn,
+          skill: "place",
+          result: placed.result,
+          detail: placed.detail,
+          moves: placed.moves,
+          imageMoved: null,
+          moves_used: memory.movesUsed,
+        });
+      }
       break;
     }
     if (chosen === "stop") {

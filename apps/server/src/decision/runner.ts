@@ -69,6 +69,8 @@ export const DecisionRunRequest = Schema.Struct({
     Schema.Int.check(Schema.isBetween({ minimum: 10, maximum: 90 }))
   ),
   supervised: withDefault(Schema.Boolean, false),
+  /** Pickup skills: after a completed pickup, put the piece back for the next attempt. */
+  place_back: withDefault(Schema.Boolean, false),
   scene: withDefault(Schema.Boolean, false),
   scene_model: Schema.optionalKey(
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80))
@@ -484,6 +486,7 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
             maxSeconds: request.max_seconds,
             maxJudgments: 80,
             signal,
+            placeBack: request.place_back,
           }
         );
         log("finished", {
