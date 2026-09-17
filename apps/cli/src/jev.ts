@@ -13,7 +13,7 @@
  * Pickup: --hover "shoulder_pan=-8.9,shoulder_lift=-0.9,elbow_flex=6.5,wrist_flex=84.5" --grasp-z -0.03
  *   [--grasp-point -0.16,0.09] [--open 55] [--scene [--scene-model M]]
  * Recording: --record "label" wraps an --execute run in a recording, then exports an MP4 (both cameras).
- * Run options: --task control-smoke|pickup-white-piece  --strategy choice|parallel|critic|rules
+ * Run options: --task control-smoke|pickup-white-piece|pickup-skills  --strategy choice|parallel|critic|rules
  *   --mock (SDK mock instead of Jev)  --goal joint+=4,joint=-8.5,...  --max-steps N  --max-seconds N  --timeout-ms N
  * ROBO_URL selects the coordinator (default http://127.0.0.1:8940); ROBO_TOKEN in token mode.
  * No mode flag prints this help and never moves anything.
@@ -120,6 +120,16 @@ const brief = (event: StreamEvent) => {
     }
     case "decision.decision_failed": {
       return `step ${String(d["step"])} decider ${String(d["failure"])}: ${String(d["error"])}`;
+    }
+    case "decision.tactics": {
+      return `tactics ${String(d["turn"])}: ${String(d["source"])} → ${String(d["next"])}${d["chosen"] === d["next"] ? "" : ` (code chose ${String(d["chosen"])}: ${String(d["veto"])})`}${d["risk"] === null || d["risk"] === undefined ? "" : ` · risk ${String(d["risk"])}`} · ${String(d["latency_ms"])} ms`;
+    }
+    case "decision.skill_finished": {
+      return `  skill ${String(d["skill"])} → ${String(d["result"])}: ${String(d["detail"])} (${String(d["moves"])} moves, ${String(d["moves_used"])} total)`;
+    }
+    case "decision.skill_aborted":
+    case "decision.tactics_failed": {
+      return `  ${event.type}: ${String(d["error"])}`;
     }
     case "decision.stage_reached": {
       return `stage ${String(d["stage"])} reached`;

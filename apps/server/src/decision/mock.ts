@@ -6,8 +6,10 @@ import { Experimental_EvaluationMockModelV4 } from "ai/test";
 
 import type { Action } from "./candidates";
 import { jevEvaluator, type Evaluator, type SpendMeter } from "./jev";
+import type { SceneState } from "./scene-state";
 import type { DecisionState } from "./state";
 import { rulesChoice } from "./strategies";
+import { rulesNext } from "./tactics";
 
 /**
  * Offline stand-in for Jev. Answers come from the rules baseline, but every
@@ -16,6 +18,8 @@ import { rulesChoice } from "./strategies";
  */
 // SAFETY: the mock only receives states built by decisionState in this module's callers.
 const asState = (value: unknown) => value as DecisionState;
+// SAFETY: the tactics mock only receives scenes built by buildScene.
+const asScene = (value: unknown) => value as SceneState;
 
 export const mockEvaluator =
   (meter: SpendMeter, offered: () => readonly Action[]): Evaluator =>
@@ -94,3 +98,37 @@ export const mockEvaluator =
       meter,
     })(request);
   };
+
+/** Offline stand-in for the skill tactician: rules answers through the real evaluate path. */
+export const mockTacticsEvaluator = (meter: SpendMeter): Evaluator =>
+  jevEvaluator({
+    meter,
+    model: new Experimental_EvaluationMockModelV4({
+      provider: "mock",
+      modelId: "mock-jev",
+      supportedQuestionTypes: ["choice", "score", "boolean"],
+      doEvaluate: (options) => {
+        const scene = asScene(options.state);
+        return Promise.resolve({
+          answers: {
+            next_skill: { type: "choice", choice: rulesNext(scene) },
+            grasp_ready: {
+              type: "boolean",
+              probability: scene.observed.tip.at_grasp_height ? 0.8 : 0.1,
+            },
+            risk: { type: "score", score: 0.2 },
+            piece_held: {
+              type: "boolean",
+              probability: scene.observed.gripper.holding ? 0.9 : 0.05,
+            },
+          },
+          usage: {
+            inputTokens: Math.round(JSON.stringify(options.state).length / 4),
+            outputTokens: 0,
+          },
+          warnings: [],
+          response: { modelId: "mock-jev" },
+        });
+      },
+    }),
+  });

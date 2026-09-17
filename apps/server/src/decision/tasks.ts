@@ -9,6 +9,7 @@ import type { Detection } from "./state";
 export const TaskName = Schema.Literals([
   "control-smoke",
   "pickup-white-piece",
+  "pickup-skills",
 ]);
 export type TaskName = typeof TaskName.Type;
 
@@ -70,6 +71,16 @@ export const resolveTask = (
   goal?: string
 ): ResolvedTask => {
   const start = obs.measured;
+  if (name === "pickup-skills") {
+    return {
+      name,
+      description:
+        "Pick up the white piece with bounded skills (scan, centre, open, descend, close, lift) chosen by a tactician.",
+      stages: [],
+      explore: [],
+      start,
+    };
+  }
   if (name === "pickup-white-piece") {
     return {
       name,

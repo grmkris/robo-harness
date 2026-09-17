@@ -9,16 +9,28 @@ import { agentControlSignal } from "../control-lifecycle";
 import { activeDecisionRuns, motionExecutor } from "../motion-executor";
 import * as robot from "../robot";
 import { emit } from "../store";
+import { ToolFailure } from "../tool-errors";
+import { whiteBlob } from "./blob";
 import { candidates, defaultLimits, type Action } from "./candidates";
 import { jevEvaluator, jevRate, memoryMeter } from "./jev";
 import { runDecisionLoop } from "./loop";
-import { mockEvaluator } from "./mock";
+import { mockEvaluator, mockTacticsEvaluator } from "./mock";
 import { pickupPerception } from "./perception";
 import { pickupDefaults, pickupTracker } from "./pickup";
 import { sceneConfig } from "./scene";
+import { buildScene } from "./scene-state";
+import { runSkillLoop } from "./skill-loop";
+import {
+  newMemory,
+  skillDefaults,
+  type MoveOutcome,
+  type SkillConfig,
+  type WristView,
+} from "./skills";
 import { sqliteMeter } from "./spend";
 import { QUESTION_VERSION } from "./state";
 import { deciderFor, strategyNames } from "./strategies";
+import { jevTactician, rulesTactician } from "./tactics";
 import {
   parseGoal,
   resolveTask,
@@ -38,7 +50,7 @@ export const DecisionRunRequest = Schema.Struct({
   mode: withDefault(Schema.Literals(["dry-run", "execute"]), "dry-run"),
   goal: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   max_steps: withDefault(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 300 })),
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 400 })),
     10
   ),
   max_seconds: withDefault(
@@ -80,6 +92,8 @@ export type DecisionRunRequest = typeof DecisionRunRequest.Type;
 const realEnvelope: Record<TaskName, { steps: number; seconds: number }> = {
   "control-smoke": { steps: 20, seconds: 60 },
   "pickup-white-piece": { steps: 250, seconds: 720 },
+  // Skill-level pickup (09-17, Kris approved unattended attempts): max_steps counts bounded moves.
+  "pickup-skills": { steps: 400, seconds: 720 },
 };
 
 const parsePoint = (text: string) => {
@@ -149,9 +163,74 @@ export const closeDecisionRuns = async () => {
   await Promise.all(active.map((run) => run.done));
 };
 
+const skillConfigFor = (
+  request: DecisionRunRequest,
+  obs: Observation
+): SkillConfig => ({
+  ...skillDefaults,
+  graspPoint: request.grasp_point
+    ? parsePoint(request.grasp_point)
+    : skillDefaults.graspPoint,
+  openPercent: request.open_percent ?? skillDefaults.openPercent,
+  limits: obs.limits,
+});
+
+const lookWrist = async (): Promise<WristView> => {
+  try {
+    const detection = whiteBlob(await robot.capture("wrist"));
+    const x = detection["center_x"];
+    const y = detection["center_y"];
+    const visible =
+      detection["visible"] === true &&
+      typeof x === "number" &&
+      typeof y === "number";
+    return {
+      visible,
+      x: visible ? x : null,
+      y: visible ? y : null,
+      size:
+        typeof detection["area_fraction"] === "number"
+          ? detection["area_fraction"]
+          : 0,
+      background: detection["background"] === true,
+    };
+  } catch {
+    return { visible: false, x: null, y: null, size: 0, background: false };
+  }
+};
+
 /** Read-only preview: the state a decision would see now, with no model call or motion. */
 export const previewDecision = async (request: DecisionRunRequest) => {
   const obs = await robot.motionIO.observe(AbortSignal.timeout(3000));
+  if (request.task === "pickup-skills") {
+    const config = skillConfigFor(request, obs);
+    const view = await lookWrist();
+    const scene = buildScene({
+      obs,
+      view,
+      config,
+      memory: newMemory(),
+      last: null,
+      repeats: 0,
+      unseenSteps: view.visible ? 0 : 1,
+      skillsRun: 0,
+      maxMoves: request.max_steps,
+      graspHeightReachedAtM: null,
+    });
+    const judgment = await rulesTactician().judge(
+      scene,
+      AbortSignal.timeout(1000)
+    );
+    return {
+      backend: obs.backend,
+      fault: obs.fault,
+      operator: obs.operator,
+      measured: obs.measured,
+      scene,
+      rules_next: judgment.next,
+      motor_writes: 0,
+    };
+  }
   let task;
   let tracker;
   try {
@@ -306,6 +385,93 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
   });
   void (async () => {
     try {
+      if (task.name === "pickup-skills") {
+        const config = skillConfigFor(request, first);
+        const tactician =
+          request.strategy === "rules"
+            ? rulesTactician()
+            : jevTactician(
+                request.decider === "mock"
+                  ? mockTacticsEvaluator(memoryMeter(rate, 10))
+                  : jevEvaluator({
+                      meter: sqliteMeter(rate),
+                      timeoutMs: request.timeout_ms,
+                    })
+              );
+        let moveCount = 0;
+        const owner = `decision-${runId}`;
+        const observe = () =>
+          robot.motionIO.observe(
+            AbortSignal.any([signal, AbortSignal.timeout(3000)])
+          );
+        const move = async (
+          target: Parameters<
+            typeof motionExecutor.execute
+          >[0]["input"]["target"],
+          durationS: number
+        ): Promise<MoveOutcome> => {
+          moveCount += 1;
+          if (request.mode !== "execute") {
+            return { status: "refused", after: null, message: "dry-run" };
+          }
+          try {
+            const outcome = await motionExecutor.execute({
+              id: `decision:${runId}:m${moveCount}`,
+              owner,
+              input: { ...(target ? { target } : {}), duration_s: durationS },
+              signal,
+              progress: () => {},
+            });
+            const after = await observe().catch(() => null);
+            log("move", {
+              n: moveCount,
+              target,
+              status: outcome.status,
+              residual: outcome.operation?.residual ?? null,
+            });
+            return { status: outcome.status, after, message: outcome.message };
+          } catch (error) {
+            const message =
+              error instanceof ToolFailure ? error.message : String(error);
+            log("move", {
+              n: moveCount,
+              target,
+              status: "refused",
+              error: message,
+            });
+            return {
+              status: "refused",
+              after: await observe().catch(() => null),
+              message,
+            };
+          }
+        };
+        const summary = await runSkillLoop(
+          {
+            observe,
+            look: () => lookWrist(),
+            move,
+            tactician,
+            log: (event, data) => {
+              log(event, data);
+            },
+          },
+          {
+            mode: request.mode,
+            config,
+            maxMoves: request.max_steps,
+            maxSeconds: request.max_seconds,
+            maxJudgments: 80,
+            signal,
+          }
+        );
+        log("finished", {
+          ...summary,
+          tactician: tactician.name,
+          seconds: Math.round((Date.now() - startedEvent.time) / 100) / 10,
+        });
+        return;
+      }
       const summary = await runDecisionLoop(
         {
           observe: (runSignal) =>

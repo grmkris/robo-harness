@@ -344,3 +344,21 @@ export const booleanAnswer = (answer: unknown): number => {
   }
   return fields.probability;
 };
+
+/** Score answer: interpolated level in [0, levels-1]. */
+export const scoreAnswer = (answer: unknown, levels: number): number => {
+  const fields = fieldsOf(answer) as AnswerFields & {
+    readonly score?: unknown;
+  };
+  const score = fields.score;
+  if (
+    fields.type !== "score" ||
+    typeof score !== "number" ||
+    !Number.isFinite(score) ||
+    score < 0 ||
+    score > levels - 1
+  ) {
+    throw new DecideFailure("invalid_answer", "score answer out of range");
+  }
+  return score;
+};
