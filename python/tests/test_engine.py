@@ -517,3 +517,44 @@ def test_stream_command_leads_the_measured_position_by_at_most_one_step(rig):
     lead = e.commanded["shoulder_pan"] - start
     assert lead == pytest.approx(e.profile["max_step"])
     assert e.fault is None
+
+
+class FakeLeader:
+    def __init__(self, target):
+        self.target = target
+        self.closed = False
+
+    def read(self):
+        return dict(self.target)
+
+    def close(self):
+        self.closed = True
+
+
+def test_leader_mode_follows_the_leader_at_the_speed_limit_and_owns_motion(rig):
+    e, c = rig
+    lease = e.acquire("teleop", mode="leader")
+    start = e.commanded.copy()
+    e.leader = FakeLeader({**start, "shoulder_pan": start["shoulder_pan"] + 30})
+    c.advance(1 / 30)
+    e.tick()
+    moved = e.commanded["shoulder_pan"] - start["shoulder_pan"]
+    assert 0 < moved <= e.profile["max_speed"] / 30 + 1e-9
+    with pytest.raises(ControlError, match="Leader teleoperation owns motion"):
+        e.submit("r", lease["lease_id"], "teleop", target={"shoulder_pan": 1})
+    e.release(lease["lease_id"], "teleop")
+    assert e.leader is None
+    assert e.fault is None
+
+
+def test_leader_target_outside_the_commissioned_range_latches_a_fault(rig):
+    e, c = rig
+    e.acquire("teleop", mode="leader")
+    lo, hi = e.profile["limits"]["shoulder_pan"]
+    e.leader = FakeLeader({**e.commanded, "shoulder_pan": hi + 5})
+    before = e.commanded.copy()
+    c.advance(1 / 30)
+    e.tick()
+    assert e.fault is not None
+    assert "commissioned range" in e.fault
+    assert e.commanded == before
