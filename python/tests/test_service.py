@@ -107,3 +107,43 @@ def test_motion_http_types_are_strict(field, value):
     body[field] = value
     with pytest.raises(ValidationError):
         Move.model_validate(body)
+
+
+def test_stream_endpoint_sets_a_setpoint_under_its_own_lease():
+    profile = json.loads((ROOT / "config/robot.example.json").read_text())
+    profile["urdf"] = str(ROOT / "assets/so101.urdf")
+    with TestClient(create_app(profile, TOKEN)) as app:
+        headers = {"Authorization": "Bearer " + TOKEN}
+        deadline = time.monotonic() + 3
+        while True:
+            acquired = app.post(
+                "/control/acquire", json={"owner": "agent", "mode": "stream"}, headers=headers
+            )
+            if acquired.status_code == 200:
+                break
+            assert acquired.status_code == 503
+            assert time.monotonic() < deadline, "Mock cameras never became ready"
+            time.sleep(0.02)
+        run_stream_checks(app, headers, acquired.json())
+
+
+def run_stream_checks(app, headers, lease):
+    start = app.get("/observe", headers=headers).json()["commanded"]["shoulder_pan"]
+    reply = app.post(
+        "/control/stream",
+        json={
+            "owner": "agent",
+            "lease_id": lease["lease_id"],
+            "target": {"shoulder_pan": start + 5},
+        },
+        headers=headers,
+    )
+    assert reply.status_code == 200
+    assert reply.json()["accepted"] is True
+    assert app.get("/observe", headers=headers).json()["stream"]["following"] is True
+    refused = app.post(
+        "/control/stream",
+        json={"owner": "agent", "lease_id": "wrong", "target": {"shoulder_pan": start}},
+        headers=headers,
+    )
+    assert refused.status_code == 409

@@ -50,6 +50,10 @@ class CancelOwner(BaseModel):
     boot_id: str
 
 
+class StreamTarget(Lease):
+    target: dict[str, float]
+
+
 class Move(Lease):
     request_id: str = Field(min_length=1, max_length=128)
     target: dict[str, float] | None = None
@@ -185,6 +189,10 @@ def create_app(profile: dict[str, Any], token: str, run_loop: bool = True) -> Fa
     @app.post("/control/stop")
     def halt():
         return engine.stop()
+
+    @app.post("/control/stream")
+    def stream(body: StreamTarget):
+        return engine.set_stream_target(body.lease_id, body.owner, body.target)
 
     @app.post("/operations")
     def move(body: Move):

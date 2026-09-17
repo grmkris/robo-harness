@@ -20,6 +20,8 @@ MAX_DURATION_S = 10
 CARTESIAN_DIMS = 3
 # A measured drift beyond this between plan and commit means the robot moved; replan.
 REPLAN_DRIFT = 0.5
+# A stream setpoint older than this is not followed; the arm holds instead.
+STREAM_STALE_S = 0.3
 # Cap on retained operations before finished ones are evicted from the ledger.
 MAX_OPERATIONS = 10000
 
@@ -53,6 +55,8 @@ class Engine:
         self.last_wall_ms = time.time() * 1000
         self.last_tick = clock()
         self.leader: Any = None
+        self.setpoint: dict[str, Any] | None = None
+        self.setpoint_rejected: str | None = None
         self.observation_guard: Callable[[], bool] = lambda: True
         self.trajectory: list[list[float]] = []
         self.profile["limits"] = {j: profile["limits"][j] for j in JOINTS}
@@ -86,6 +90,13 @@ class Engine:
                     "remaining_ms": max(0, (lease["expires"] - now) * 1000),
                 },
                 "operation": copy.deepcopy(self.operation),
+                "stream": None
+                if not self.setpoint
+                else {
+                    "age_ms": (now - self.setpoint["at"]) * 1000,
+                    "following": now - self.setpoint["at"] <= STREAM_STALE_S,
+                    "rejected": self.setpoint_rejected,
+                },
                 "fault": self.fault,
                 "limits": self.profile["limits"],
                 "max_step": self.profile["max_step"],
@@ -103,7 +114,7 @@ class Engine:
         expected_boot_id: str | None = None,
         expected_control_epoch: int | None = None,
     ) -> dict[str, Any]:
-        if mode not in ("human", "agent", "leader"):
+        if mode not in ("human", "agent", "leader", "stream"):
             raise ControlError("Unknown controller mode", 400)
         with self.lock:
             if expected_boot_id is not None and expected_boot_id != self.boot_id:
@@ -112,7 +123,7 @@ class Engine:
                 raise ControlError("Control was revoked; stale acquisition refused")
             if self.fault:
                 raise ControlError("Hardware fault is latched; inspect before restarting the service")
-            if mode == "agent" and not self.observation_guard():
+            if mode in ("agent", "stream") and not self.observation_guard():
                 raise ControlError("Camera observation is stale or unavailable", 503)
             if self.lease and self.lease["expires"] > self.clock():
                 if self.lease["owner"] == owner and self.lease["mode"] == mode and not takeover:
@@ -157,6 +168,61 @@ class Engine:
             self._stop("Controller released")
             self.lease = None
 
+    def set_stream_target(self, lease_id: str, owner: str, target: dict[str, float]) -> dict[str, Any]:
+        """Set the absolute target a stream controller is driving toward.
+
+        Unlike an operation this makes no promise about arrival: the motor tick
+        rate-limits toward the newest setpoint and holds when one stops
+        arriving. A target that fails validation is refused here, and one that
+        would violate the geometry mid-travel is dropped by the tick, which
+        holds rather than latching a fault -- a stream is a stream of
+        intentions, and a single bad one must not end the session.
+        """
+        with self.lock:
+            self._check_lease(lease_id, owner)
+            if cast("dict[str, Any]", self.lease)["mode"] != "stream":
+                raise ControlError("Control lease is not a stream")
+            if not target or any(j not in JOINTS for j in target):
+                raise ControlError("Unknown or empty joint target", 400)
+            goal = {**self.commanded, **target}
+            for j, v in goal.items():
+                lo, hi = self.profile["limits"][j]
+                if (
+                    isinstance(v, bool)
+                    or not isinstance(v, (int, float))
+                    or not math.isfinite(v)
+                    or not lo <= v <= hi
+                ):
+                    raise ControlError(f"{j} target exceeds commissioned limits", 422)
+            self.setpoint = {"target": goal, "at": self.clock()}
+            # A setpoint is also a sign of life: it renews the lease.
+            cast("dict[str, Any]", self.lease)["expires"] = self.clock() + 3
+            return {
+                "accepted": True,
+                "target": goal,
+                "commanded": self.commanded.copy(),
+                "measured": self.measured.copy(),
+                "rejected": self.setpoint_rejected,
+            }
+
+    def _stream_proposal(self, dt: float) -> dict[str, float]:
+        """Rate-limited step toward the newest setpoint, or the current hold."""
+        setpoint = self.setpoint
+        if not setpoint or self.clock() - setpoint["at"] > STREAM_STALE_S:
+            return self.commanded
+        step = self.profile["max_speed"] * dt
+        candidate = {
+            j: self.commanded[j] + max(-step, min(step, setpoint["target"][j] - self.commanded[j]))
+            for j in JOINTS
+        }
+        try:
+            self.kin.validate(candidate, self.profile)
+        except ValueError as e:
+            self.setpoint_rejected = str(e)
+            return self.commanded
+        self.setpoint_rejected = None
+        return candidate
+
     def stop(self, reason: str = "Stopped by operator") -> dict[str, Any]:
         with self.lock:
             self.control_epoch += 1
@@ -187,6 +253,8 @@ class Engine:
             )
         # Hold the last commanded position, not the sagged measured position.
         self.trajectory = []
+        self.setpoint = None
+        self.setpoint_rejected = None
         if self.leader:
             with contextlib.suppress(Exception):
                 self.leader.close()
@@ -213,8 +281,11 @@ class Engine:
                 if old["_signature"] != signature:
                     raise ControlError("Request ID was reused with different motion")
                 return self._public(old)
-            if cast("dict[str, Any]", self.lease)["mode"] == "leader":
+            mode = cast("dict[str, Any]", self.lease)["mode"]
+            if mode == "leader":
                 raise ControlError("Leader teleoperation owns motion")
+            if mode == "stream":
+                raise ControlError("Stream control owns motion")
             if not request_id or len(request_id) > MAX_REQUEST_ID:
                 raise ControlError("A bounded request ID is required", 400)
             if self.operation and self.operation["status"] in ("accepted", "running"):
@@ -352,6 +423,8 @@ class Engine:
                 if self.fault:
                     return
                 proposed = self.commanded
+                if self.lease and self.lease["mode"] == "stream":
+                    proposed = self._stream_proposal(dt)
                 if self.leader and self.lease:
                     target = self.leader.read()
                     if set(target) != set(JOINTS):

@@ -419,3 +419,85 @@ def test_unresponsive_joint_fails_and_owner_cleanup_preserves_result(rig):
     assert e.cancel_owner("probe", e.boot_id) == {"cancelled": True}
     assert e.get_operation(op["id"]) == failed
     assert e.commanded["shoulder_pan"] == 1
+
+
+def test_stream_follows_the_newest_setpoint_at_the_speed_limit(rig):
+    e, c = rig
+    lease = e.acquire("agent", mode="stream")
+    start = e.commanded["shoulder_pan"]
+    reply = e.set_stream_target(lease["lease_id"], "agent", {"shoulder_pan": start + 30})
+    assert reply["accepted"]
+    # One tick moves at most max_speed * dt, however far away the setpoint is.
+    c.advance(1 / 30)
+    e.tick()
+    assert abs(e.commanded["shoulder_pan"] - start) <= e.profile["max_speed"] / 30 + 1e-9
+    # A setpoint keeps the lease alive without a separate renew.
+    for _ in range(8):
+        c.advance(1 / 30)
+        e.set_stream_target(lease["lease_id"], "agent", {"shoulder_pan": start + 30})
+        e.tick()
+    travelled = e.commanded["shoulder_pan"] - start
+    assert 0 < travelled <= e.profile["max_speed"] * (9 / 30) + 1e-9
+    assert e.observe()["stream"]["following"] is True
+    assert e.fault is None
+
+
+def test_stream_holds_when_setpoints_stop_arriving(rig):
+    e, c = rig
+    lease = e.acquire("agent", mode="stream")
+    start = e.commanded["shoulder_pan"]
+    e.set_stream_target(lease["lease_id"], "agent", {"shoulder_pan": start + 30})
+    c.advance(1 / 30)
+    e.tick()
+    assert e.commanded["shoulder_pan"] != start
+    # The arm keeps following for the stale window, then holds where it got to,
+    # with the lease still live.
+    advance(e, c, 0.4)
+    held = e.commanded["shoulder_pan"]
+    assert e.observe()["stream"]["following"] is False
+    advance(e, c, 0.5)
+    assert e.commanded["shoulder_pan"] == held
+    assert e.lease is not None
+    assert e.fault is None
+
+
+def test_stream_refuses_a_target_outside_the_limits(rig):
+    e, _ = rig
+    lease = e.acquire("agent", mode="stream")
+    lo, hi = e.profile["limits"]["shoulder_pan"]
+    with pytest.raises(ControlError, match="commissioned limits"):
+        e.set_stream_target(lease["lease_id"], "agent", {"shoulder_pan": hi + 1})
+    with pytest.raises(ControlError, match="Unknown or empty joint target"):
+        e.set_stream_target(lease["lease_id"], "agent", {"nope": 0})
+    assert lo <= e.commanded["shoulder_pan"] <= hi
+    assert e.fault is None
+
+
+def test_stream_drops_a_setpoint_that_violates_geometry_without_latching(rig):
+    e, c = rig
+    lease = e.acquire("agent", mode="stream")
+
+    def refuse(_pose, _profile):
+        raise ValueError("would strike the table")
+
+    e.kin.validate = refuse
+    start = e.commanded.copy()
+    e.set_stream_target(lease["lease_id"], "agent", {"shoulder_lift": start["shoulder_lift"] + 20})
+    c.advance(1 / 30)
+    e.tick()
+    assert e.commanded == start
+    assert e.fault is None
+    stream = e.observe()["stream"]
+    assert stream["rejected"] == "would strike the table"
+    assert e.lease is not None
+
+
+def test_stream_mode_owns_motion_and_ends_with_the_lease(rig):
+    e, _ = rig
+    lease = e.acquire("agent", mode="stream")
+    with pytest.raises(ControlError, match="Stream control owns motion"):
+        e.submit("r", lease["lease_id"], "agent", target={"shoulder_pan": 1})
+    e.stop()
+    assert e.setpoint is None
+    with pytest.raises(ControlError, match="lease is absent"):
+        e.set_stream_target(lease["lease_id"], "agent", {"shoulder_pan": 1})
