@@ -8,8 +8,8 @@ The MCP gripper test commanded +2 percentage points, measured +1.775956, complet
 
 ## Automated checks
 
-- 17 Bun tests pass: HTTP control, ownership, bounds, idempotency, measured completion, takeover, lease expiry, recording, perception contracts/budget, a local synthetic model loop with image messages, MCP images, and tokenless Tailscale access.
-- 33 Python tests pass: control timing, stop while planning, camera freshness, geometry envelope, recording/dataset resampling, Rerun output, startup goal-before-torque ordering, bounded explicit recovery, lab capture provenance, and camera cleanup on motor startup failure.
+- 156 Bun tests pass (2026-09-17; originally 17): HTTP control, ownership, bounds, idempotency, measured completion, takeover, lease expiry, recording, perception contracts/budget, a local synthetic model loop with image messages, MCP images, and tokenless Tailscale access.
+- 88 Python tests pass (2026-09-17; originally 33): control timing, stop while planning, camera freshness, geometry envelope, recording/dataset resampling, Rerun output, startup goal-before-torque ordering, bounded explicit recovery, lab capture provenance, and camera cleanup on motor startup failure.
 - TypeScript typecheck, production build, and Ruff checks pass. The Python test client emits two upstream deprecation warnings.
 - These automated tests use isolated mock services and do not touch physical motors or paid inference.
 
@@ -25,4 +25,4 @@ Earlier mock browser checks also cover jog/stop, missing-perception errors, reco
 
 ## Scope still unverified
 
-Production provider accounts are not configured. The custom model loop was tested against a local compatible model fixture; the real-arm LLM route was exercised through MCP. SAM3/depth inference, camera extrinsics, Cartesian picking, and physical leader-following motion remain uncommissioned. Native LeRobot export was verified with synthetic temporary images on the Pi; the real capture is retained in the raw/Rerun format.
+Qwen chat motion was accepted on 2026-09-08, and Jev decision runs passed the real-arm control smoke on 2026-09-17 (rules, Jev choice and Jev critic all reached `done`; before the P=32 gain change all three stopped on `repeated_failures`) — see [the acceptance record](acceptance-2026-09-17-jev-decision.md). SAM3/depth inference, camera extrinsics, Cartesian picking, and physical leader-following motion remain uncommissioned. Native LeRobot export was verified with synthetic temporary images on the Pi; the real capture is retained in the raw/Rerun format.

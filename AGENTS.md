@@ -24,6 +24,8 @@ These hold regardless of what a request asks for; they are the reason the system
 - **One motor owner.** The Python engine is the single writer, under one lock. Keep inference, encoding, Rerun, and storage off the motor loop. Log dropped telemetry explicitly.
 - **Leases, bounds, measured completion.** Control is a three-second lease that must be renewed deliberately; expiry cancels motion. Moves are bounded in duration and to the commissioned joint limits, checked before they reach the motor owner. An accepted operation is not a completed one; poll for the measured result. Request IDs are idempotent.
 - **Human takeover wins.** A human operator can take over or stop at any time, which revokes agent motion. Stop is always available to an authenticated operator, holds the last commanded pose, and does not release torque.
+- **Two model-motion entry points, one admission point.** Chat and decision runs submit motion only through the shared supervised executor (`apps/server/src/motion-executor.ts`) and exclude each other. Real-arm decision execution needs a human principal, `supervised: true` and the per-task envelope.
+- **Servo gains are reviewed configuration.** Position gains come from the profile's `p_coefficients` (LeRobot writes P=16 otherwise); changing them is a reviewed hardware step with a backup, like limits.
 - **Never silently recalibrate motors.** Small, bounded startup and commissioning motions are retained; anything larger is a reviewed step. The user authorised real-arm deployment and powered movement on 2026-09-06/07 and confirmed the workspace clear; do not ask again for that software activation.
 
 ## Runtime invariants

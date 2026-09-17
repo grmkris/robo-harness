@@ -33,8 +33,9 @@ For access from another tailnet machine, build first and start with `ROBO_HOST=1
 2. Stop/hold cancels movement and revokes control. Release returns to holding.
 3. Leader teleoperation becomes available only on commissioned real hardware.
 4. Configure a model provider in `.env` to chat. Chat supervises each bounded move through acquisition, renewal, measured completion and release; it cannot take over human control. The model picker shows effective camera-image support. Optional tools are enabled through discovery; see [the chat action decision](docs/decisions/0004-supervised-chat-motion.md) for configuration and recovery behavior.
-5. Use Recordings to capture observations, actions, code references, and Rerun replay. Replay is historical; manual controls always refer to live state.
-6. Configure a perception worker and a conservative per-request charge, then approve an aggregate spending cap in Activity. Segmentation/depth stay off until both are configured.
+5. Decision runs (`bun run jev`) let an evaluation model or rules baseline pick bounded joint steps; chat and a decision run never move the arm at the same time.
+6. Use Recordings to capture observations, actions, code references, and Rerun replay. Replay is historical; manual controls always refer to live state.
+7. Configure a perception worker and a conservative per-request charge, then approve an aggregate spending cap in Activity. Segmentation/depth stay off until both are configured.
 
 Rerun includes robot geometry, frames, camera streams, proposed paths, joint plots, and a capture timeline. The arm display uses the lab's mesh-free URDF as a kinematic skeleton; it is not a physics simulator or a full collision model. Estimated depth is labeled relative unless the backend explicitly supplies calibrated metric depth.
 
@@ -47,6 +48,8 @@ Alibaba Token Plan uses its compatible API through our own loop. xAI uses an API
 Claude and Codex subscription adapters are visibly unavailable until their direct custom-loop route is verified. External Claude/Codex agents can use the MCP server now. There is no substitution of native agent runtimes for the custom loop.
 
 The model loop supports streaming, tool execution, observation images, steering, cancellation, persisted conversations, bounded step counts, and basic complete-turn context trimming. Provider errors are redacted before reaching the journal.
+
+TypeSafe's Jev (`typesafe-ai/jev`) is an evaluation model, not a chat provider: the decision runner calls it through the AI SDK `experimental_evaluate` API on Vercel AI Gateway with `AI_GATEWAY_API_KEY` (paid Gateway credits; free credits exclude it, and zero data retention is opt-in with `ROBO_JEV_ZDR=1` on Pro/Enterprise plans). Cumulative spend is capped by `ROBO_JEV_BUDGET_USD` (default 10). The optional scene describer for pickup runs uses an OpenAI-compatible endpoint (cliproxy by default, `CLIPROXY_API_KEY` or `ROBO_SCENE_*`).
 
 See `.env.example` for configuration. Credentials from Invok are not imported automatically.
 
@@ -65,6 +68,18 @@ bun run cli release
 A lease lasts three seconds. Renew deliberately while controlling; expiry cancels unfinished motion. Degrees apply to arm joints, percent to the gripper, and meters to Cartesian positions. Accepted means queued, not reached. Poll the operation for measured completion.
 
 Use [the ready MCP configuration](examples/mcp.json) on this machine, or configure command `bun`, arguments `["/home/kristjan/code/robo-harness/apps/cli/src/mcp.ts"]`, and `ROBO_URL=http://100.105.51.45:8940`. Capture tools return actual MCP image blocks. Set a distinct `ROBO_CONTROLLER` per concurrent agent.
+
+Decision runs are driven from `bun run jev` (a thin coordinator client; see [decision 0011](docs/decisions/0011-decision-runner.md)):
+
+```sh
+bun run jev --smoke [--mock]                       # Gateway proof, no robot
+bun run jev --observe [--task T] [--goal G]        # read-only state + candidate steps
+bun run jev --fixtures --strategy choice|parallel|critic|rules [--mock]
+bun run jev --dry-run --strategy critic --max-steps 5
+bun run jev --execute --supervised --strategy choice --max-steps 20 --max-seconds 60   # real arm: operator present
+```
+
+Goals use `joint+=N` / `joint-=N` (relative) and `joint=N` (absolute). Each run writes `decision.*` events and a JSONL log under `ROBO_DATA_DIR/decision-runs/`.
 
 The Python client is `robo_harness.client.Robot`. Its context manager acquires/releases control, and `move()` renews the lease while awaiting measured completion. See `examples/inspect_and_nudge.py`.
 
@@ -104,7 +119,7 @@ Use `uv run robo-calibrate --help` to prepare a saved workspace frame, fit measu
 
 ## Hardware deployment
 
-The lab runs the systemd units from this `main` working tree (no worktree or branch); config and provider credentials live in `~/.config/robo-harness.env` and data under `ROBO_DATA_DIR`. A promotion is `bun run build` plus `systemctl --user restart robo-app robo-rerun`; see [deployment](docs/real-arm-preflight.md). The deployed rig uses [config/robot.lab-pi.json](config/robot.lab-pi.json); [config/robot.example.json](config/robot.example.json) remains mock-only. Real MCP movement, stop/hold, both cameras, recording/replay, and container observations were verified on 2026-09-06/07. The user confirmed physical readiness and authorized powered movement. See [current deployment](docs/real-arm-preflight.md) and [future commissioning](docs/commissioning.md).
+The lab runs the systemd units from this `main` working tree (no worktree or branch); config and provider credentials live in `~/.config/robo-harness.env` and data under `ROBO_DATA_DIR`. A promotion is `bun run build` plus `systemctl --user restart robo-app robo-rerun`; see [deployment](docs/real-arm-preflight.md). The deployed rig uses [config/robot.lab-pi.json](config/robot.lab-pi.json); [config/robot.example.json](config/robot.example.json) remains mock-only. Real MCP movement, stop/hold, both cameras, recording/replay, and container observations were verified on 2026-09-06/07. On 2026-09-17 the profile gained per-joint position gains (P=32 on arm joints) after a servo trace showed LeRobot's P=16 dead band, and the control smoke passed on the real arm with the rules baseline and Jev; see [the acceptance record](docs/acceptance-2026-09-17-jev-decision.md). The user confirmed physical readiness and authorized powered movement. See [current deployment](docs/real-arm-preflight.md) and [future commissioning](docs/commissioning.md).
 
 The implementation follows LeRobot hardware/calibration conventions, adapts the existing lab's camera lock and geometry, and draws on the custom-loop patterns in Invok and the archived harness. It has no runtime dependency on either application.
 

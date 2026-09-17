@@ -71,3 +71,17 @@ At inspection, the measured pose passed the existing model validation, with an e
 Evidence is retained in `var/leader-fault-2026-09-09/`, including the full observation and fresh camera captures. This leader result does not establish why the earlier bounded moves stopped short of their targets.
 
 Validation for the fault display: the full repository check passed (132 Bun tests and 83 Python tests), and the production build passed. The browser fixture exercises manual acquisition/renewal/release, an injected observation fault, disabled acquisition controls, persistent fault text after Stop, and mobile layout. The fixture uses mock hardware and does not establish real leader-following safety.
+
+## Resolution — 2026-09-17
+
+The weak joint response was LeRobot's follower gain. `configure_follower_with_hold` wrote `P_Coefficient` 16 on every connect (LeRobot's own "avoid shakiness" value; firmware default 32). With bounded ≤2° steps the resulting force never overcomes friction and gravity, so a target can be received exactly and still not settle — the 16-tick pan gap above.
+
+`scripts/servo_step_trace.py` confirmed it with `robo-io` stopped, one joint at a time, sampling goal, position, voltage, current and status:
+
+| Joint | P=16 | P=32 |
+| --- | --- | --- |
+| wrist_flex, −1.8° against gravity | moved 0.00°, peak 32 mA | moved 1.41° (residual 0.75°), peak 143 mA |
+| shoulder_pan ±1.8° | residual 0.48° / 0.44° | residual 0.13° / 0.18° |
+| shoulder_lift ±1.8° (upright, light load) | residual 0.75° / 0.18° | residual 0.48° / 0.00° |
+
+Supply voltage read 5.3 V at rest and dipped to 4.7 V under load; no servo status errors. Power is not the main cause. The profile now sets `p_coefficients` 32 on the arm joints and 16 on the gripper (commit `2b3aca6`). The same control smoke that previously stopped on wrist failures then passed with rules, Jev choice and Jev critic. Traces: `var/servo-trace-2026-09-17/`.

@@ -26,7 +26,7 @@ The user authorized deployment, confirmed a clear workspace, and the first power
 
 - Clear and secure the workspace, support the arm if torque changes, and verify the physical power cut-off is reachable.
 - Stop existing motor programs. Confirm no process has either serial device open. Coordinate stopping labcam-preview immediately before the new camera owner starts; the shared flock rejects concurrent ownership.
-- Start the reviewed service and check observation-only values against the physical pose. Connection never auto-calibrates, but LeRobot connection can enable torque.
+- Start the reviewed service and check observation-only values against the physical pose. Connection never auto-calibrates, but LeRobot connection can enable torque, and startup writes position gains: LeRobot's P=16 unless the profile sets `p_coefficients`.
 - Verify the configured commanded-position hold behavior. Do not substitute measured-position tracking that could accumulate sag.
 - Test very small joint/gripper movements, stop during motion, lease expiry, controller disconnect, and human takeover. Verify targets settle rather than merely being sent.
 - Check FK against measured poses and short Cartesian moves before enabling cartesian_reviewed.
@@ -36,7 +36,7 @@ The user authorized deployment, confirmed a clear workspace, and the first power
 
 ## Rollback
 
-Stop Robo Harness I/O before restarting labcam-preview or another motor owner. Restore the prior reviewed release/profile. Do not automatically release torque, resume an interrupted trajectory, or recalibrate during rollback.
+Stop Robo Harness I/O before restarting labcam-preview or another motor owner. Restore the prior reviewed release/profile, including its `p_coefficients`. Do not automatically release torque, resume an interrupted trajectory, or recalibrate during rollback.
 
 ## Pi development
 

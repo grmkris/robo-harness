@@ -6,7 +6,7 @@ The user confirmed the workspace was clear and authorized powered movement. The 
 
 - Workbench: http://100.105.51.45:8940, Tailscale access without login.
 - Netcup development checkout: `/home/kristjan/code/robo-harness` (branch `main`).
-- Netcup deployment: both systemd units (`robo-app`, `robo-rerun`) run from the `main` working tree at `/home/kristjan/code/robo-harness` — no worktree, no deploy branch. Real config and the Alibaba/Grok credentials are in `/home/kristjan/.config/robo-harness.env` (the repo `.env` is dev/mock; Bun lets the systemd env file win). Data lives in `/home/kristjan/.local/state/robo-harness` via `ROBO_DATA_DIR`. Promote with `bun run build` then `systemctl --user restart robo-app robo-rerun`.
+- Netcup deployment: both systemd units (`robo-app`, `robo-rerun`) run from the `main` working tree at `/home/kristjan/code/robo-harness` — no worktree, no deploy branch. Real config and the Alibaba/Grok, Vercel AI Gateway (`AI_GATEWAY_API_KEY`, Jev) and cliproxy (`CLIPROXY_API_KEY`, scene describer) credentials are in `/home/kristjan/.config/robo-harness.env` (the repo `.env` is dev/mock; Bun lets the systemd env file win). Data lives in `/home/kristjan/.local/state/robo-harness` via `ROBO_DATA_DIR`. Promote with `bun run build` then `systemctl --user restart robo-app robo-rerun`.
 - Netcup firewall: ufw denies everything not on `tailscale0`, so development containers on Docker's bridge need `sudo ufw allow in on docker0 to 100.105.51.45 port 8940 proto tcp` (applied 2026-09-07). Bridge peers are still refused as operators; they authenticate with their program token.
 - Netcup user services: `robo-app.service` and `robo-rerun.service`, enabled with user lingering already active.
 - Pi: `kris@100.77.154.45`; deployment `/home/kris/robo-harness`.
@@ -24,7 +24,7 @@ The initial folded elbow was at raw 3152, eight ticks beyond its saved maximum 3
 
 Ordinary startup never performs this recovery automatically: it loads a measured-position goal before enabling torque and rejects out-of-range poses. `scripts/recover_startup_pose.py` is a separate explicit tool for small inward recovery. The LeRobot adapter also converts its relative limit to float, as required by LeRobot's motion helper.
 
-The real profile is `config/robot.lab-pi.json`: register-derived joint limits, maximum step 2 degrees/percentage points, maximum speed 2 units/s, and Cartesian control disabled. The lab URDF and coarse table/workspace envelope support visualization and basic checks; they are not calibrated grasp geometry or a complete collision model.
+The real profile is `config/robot.lab-pi.json`: register-derived joint limits, maximum step 2 degrees/percentage points, maximum speed 2 units/s, Cartesian control disabled, and `p_coefficients` (position gain 32 on the five arm joints, 16 on the gripper, since 2026-09-17; the pre-change driver and profile are backed up on the Pi in `var/backup-2026-09-17-pgain`). The lab URDF and coarse table/workspace envelope support visualization and basic checks; they are not calibrated grasp geometry or a complete collision model.
 
 ## End-to-end evidence
 
@@ -46,16 +46,27 @@ The real profile is `config/robot.lab-pi.json`: register-derived joint limits, m
 systemctl --user status robo-app robo-rerun
 journalctl --user -u robo-app -u robo-rerun -n 50
 
-# Pi: inspect before a manual restart; a restart configures and enables motors.
+# Pi: inspect before a manual restart; a restart configures gains and enables motors.
 ssh kris@100.77.154.45 'sudo systemctl status robo-io'
 ssh kris@100.77.154.45 'sudo journalctl -u robo-io -n 50'
+ssh kris@100.77.154.45 'sudo systemctl stop robo-io'     # torque stays on; the arm holds
+ssh kris@100.77.154.45 'sudo systemctl start robo-io'    # torque briefly off, then holds the measured pose
 ```
+
+Startup notes (2026-09-17):
+
+- A latched fault (for example `Arm geometry intersects the configured table clearance`) clears only by restarting `robo-io`.
+- Startup refuses a joint outside its saved calibration range and leaves torque off (`… reposition with torque off before connecting`). Move that joint a few degrees inward by hand and start again.
+- Right after a Pi boot, LeRobot import and connection can take about 100 s before `Application startup complete`.
+- To make the arm limp, cut the follower's servo power; stopping the service does not release torque.
+- After a power pull the follower USB board once stopped enumerating (`device not accepting address … error -22`); reseating the cable did not help, a full power cycle of the Pi and both arms did.
+- `scripts/servo_step_trace.py` diagnoses weak joint response with the service stopped (it becomes the only motor owner, changes no torque or calibration, and restores P and position).
 
 Use the workbench Stop/Hold button to cancel motion and revoke control. Stopping the I/O service closes devices while retaining torque/hold; it does not release the arm. To return camera ownership, stop `robo-io` before starting `labcam-preview`. After a Pi reboot, start `robo-io` explicitly; its service conflict handles camera ownership.
 
 ## Remaining optional work
 
-Built-in chat still needs an explicitly configured provider account; external LLMs already use MCP. SAM3/depth inference is optional and needs a worker/model setup. Camera extrinsics, Cartesian picking, leader-following motion, and a dedicated Pi development shell have not been physically commissioned. Netcup's development container and robot API are working now.
+Built-in chat runs with Qwen (accepted 2026-09-08) and decision runs with Jev (2026-09-17). SAM3/depth inference is optional and needs a worker/model setup. Camera extrinsics, Cartesian picking, leader-following motion, and a dedicated Pi development shell have not been physically commissioned. Netcup's development container and robot API are working now.
 
 ## Chat action upgrade — 2026-09-08
 
