@@ -57,6 +57,8 @@ export interface SkillConfig {
   readonly sweepClearanceM: number;
   /** Radius from the base at which the first search arc runs. */
   readonly scanRadiusM: number;
+  /** Pan heading the search arcs are centred on: where the mat is. */
+  readonly scanCenterPanDeg: number;
   readonly liftM: number;
   readonly openPercent: number;
   readonly heldPercent: number;
@@ -80,6 +82,7 @@ export const skillDefaults = {
   scanHeightM: 0.1,
   sweepClearanceM: 0.03,
   scanRadiusM: 0.2,
+  scanCenterPanDeg: 0,
   liftM: 0.05,
   openPercent: 60,
   heldPercent: 4,
@@ -400,7 +403,8 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
   // the start of the search first: the scan height, at a real radius along
   // the current heading. At that height one arc covers roughly 20 cm of mat.
   const [x0, y0] = tipOf(obs);
-  const heading = Math.atan2(y0, x0);
+  // Along the mat's heading: the arm may have been left pointing anywhere.
+  const heading = (-ctx.config.scanCenterPanDeg * Math.PI) / 180;
   const startRadius = Math.max(Math.hypot(x0, y0), ctx.config.scanRadiusM);
   const startTip: Vec3 = [
     Math.cos(heading) * startRadius,
@@ -438,7 +442,7 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
   // A serpentine raster: sweep the pan arc, step the reach outward, sweep
   // back. Each arc is one continuous pan traversal, so the search costs a
   // sweep per arc rather than a return trip per look position.
-  const startPan = obs.measured.shoulder_pan;
+  const startPan = ctx.config.scanCenterPanDeg;
   const [low, high] = ctx.config.limits["shoulder_pan"] ?? [-110, 110];
   const arcPan = (sign: number) =>
     Math.min(
@@ -477,6 +481,11 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
           ctx.memory.movesUsed - startMoves
         );
       }
+    }
+    const sag = ctx.config.scanHeightM - heightAboveMat(obs, ctx.config);
+    if (sag > 0.02) {
+      const up = await moveTip(ctx, [0, 0, sag], 30);
+      obs = up.obs;
     }
     const goalPan = arcPan(sign);
     for (let i = 0; i < 80; i += 1) {
