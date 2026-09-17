@@ -25,4 +25,8 @@ A fourth lease mode, `stream`, alongside `human`, `agent` and `leader`.
 
 Stream mode has no ledger and no measured-outcome record per intention, which is exactly why it is not the default: an auditable bounded step stays the shape for anything a person or a model decides deliberately. It is for code-owned closed loops — centring, descending, and a future 10 Hz teleop — where the _loop_ is the thing under review and the motor owner still enforces speed, limits, geometry, freshness and stop.
 
+The coordinator has no stream client yet: it lands with its first consumer, because a client with no caller is dead code and the measurements below decide what that consumer should be. `scripts/stream_trace.py` drives the mode directly for measurement, the way `servo_step_trace.py` drives a servo.
+
+Measured on the real arm on the day it landed, 10.07 Hz achieved from the Pi with a 5.2 ms round trip: against a 3° setpoint `wrist_flex` travelled 1.58° and stopped, `shoulder_lift` 1.32°, and both returned to their start within 0.09°. So the mode works and the lead does move a joint that bounded steps could not budge — but the loaded direction still reaches equilibrium about 1.5° short, because 2° of lead against these P gains is all the torque there is. Fine motion upward needs a higher gain, not a different control path.
+
 The coordinator must keep posting setpoints at 10 Hz or better or the arm will hold every 300 ms, which is a usable failure: it is slow, not unsafe.

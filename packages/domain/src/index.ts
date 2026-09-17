@@ -79,6 +79,17 @@ export const Observation = Schema.Struct({
     })
   ),
   operation: Schema.NullOr(Operation),
+  // Present only under a stream lease: how old the newest setpoint is, whether
+  // it is still being followed, and why a candidate was last dropped.
+  stream: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        age_ms: Schema.Finite,
+        following: Schema.Boolean,
+        rejected: Schema.NullOr(Schema.String),
+      })
+    )
+  ),
   fault: Schema.NullOr(Schema.String),
   limits: Schema.Record(Joint, Schema.Tuple([Schema.Finite, Schema.Finite])),
   max_step: Schema.Finite,
