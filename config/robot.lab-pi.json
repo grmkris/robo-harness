@@ -36,7 +36,7 @@
   },
   "camera_calibrations": {},
   "hold_mode": "commanded",
-  "profile_review": "2026-09-06: user confirmed clear workspace and powered activation. Calibration recovered from both motor buses without changing calibration registers. Initial joint control only, <=2 degrees/percent and <=2 units/s; inherited lab URDF for visualization, Cartesian geometry not commissioned. 2026-09-17: position gain P=32 on the five arm joints (gripper stays 16) after scripts/servo_step_trace.py showed LeRobot's P=16 dead band (wrist_flex 0.00 of 1.8 deg at 16 vs 1.41 at 32; supply 4.7-5.3 V). 2026-09-17: table_z_m -0.054 (was placeholder -0.08): the jaw touched the mat at model gripper-frame z -0.044 on 09-09 and 09-17, so poses with a frame below -0.039 m are refused (422) about 5 mm above measured contact. 2026-09-17: shoulder_lift P=48 after servo_step_trace under full arm load (folded pose, +1.8 deg): P=32 residual 0.92 (fails 0.8 completion), P=48 0.39, P=64 0.22; no status errors, supply 5.1-5.3 V.",
+  "profile_review": "2026-09-06: user confirmed clear workspace and powered activation. Calibration recovered from both motor buses without changing calibration registers. Initial joint control only, <=2 degrees/percent and <=2 units/s; inherited lab URDF for visualization, Cartesian geometry not commissioned. 2026-09-17: position gain P=32 on the five arm joints (gripper stays 16) after scripts/servo_step_trace.py showed LeRobot's P=16 dead band (wrist_flex 0.00 of 1.8 deg at 16 vs 1.41 at 32; supply 4.7-5.3 V). 2026-09-17: table_z_m -0.054 (was placeholder -0.08): the jaw touched the mat at model gripper-frame z -0.044 on 09-09 and 09-17, so poses with a frame below -0.039 m are refused (422) about 5 mm above measured contact. 2026-09-17: shoulder_lift P=48 after servo_step_trace under full arm load (folded pose, +1.8 deg): P=32 residual 0.92 (fails 0.8 completion), P=48 0.39, P=64 0.22; no status errors, supply 5.1-5.3 V. 2026-09-17: elbow_flex P=64 after servo_step_trace with the forearm extended (-1.8 deg against gravity): P=32 moved 0.00, P=48 residual 0.83, P=64 residual 0.39 at 455 mA peak; no status errors, supply >= 5.0 V.",
   "leader_id": "arm",
   "leader_calibration_dir": "/home/kris/robo-harness/calibration/leader",
   "camera_session_path": "/home/kris/robo-harness/var/camera-session.json",
@@ -44,7 +44,7 @@
   "p_coefficients": {
     "shoulder_pan": 32,
     "shoulder_lift": 48,
-    "elbow_flex": 32,
+    "elbow_flex": 64,
     "wrist_flex": 32,
     "wrist_roll": 32,
     "gripper": 16
