@@ -16,6 +16,7 @@ import { mockEvaluator } from "./mock";
 import { sqliteMeter } from "./spend";
 import { decisionState } from "./state";
 import { deciderFor, type StrategyName } from "./strategies";
+import { stageTracker } from "./tasks";
 
 export type DeciderKind = "jev" | "mock";
 
@@ -141,22 +142,24 @@ export const runFixtures = async (
   let cost = 0;
   const latencies: number[] = [];
   for (const item of fixtures) {
+    const task = {
+      name: "control-smoke" as const,
+      description:
+        "Reach the goal joint pose using only the offered bounded steps. No object is involved.",
+      stages: [item.goal],
+      explore: [],
+      start: item.obs.measured,
+    };
+    const view = stageTracker(task, defaultLimits).advance(item.obs, []);
     offered = candidates(
       item.obs,
-      { goal: item.goal, explore: [] },
+      { goal: view.goal, explore: view.explore },
       defaultLimits
     );
     const state = decisionState({
       obs: item.obs,
-      task: {
-        name: "control-smoke",
-        description:
-          "Reach the goal joint pose using only the offered bounded steps. No object is involved.",
-        stages: [item.goal],
-        explore: [],
-        start: item.obs.measured,
-      },
-      stage: 0,
+      task,
+      view,
       limits: defaultLimits,
       previous: item.previous,
       progress: {

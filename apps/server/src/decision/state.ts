@@ -1,16 +1,10 @@
 import type { Observation } from "@robo/domain";
 
-import {
-  freshness,
-  reached,
-  remaining,
-  type Action,
-  type Limits,
-} from "./candidates";
-import type { ResolvedTask } from "./tasks";
+import { freshness, remaining, type Action, type Limits } from "./candidates";
+import type { ResolvedTask, TrackerView } from "./tasks";
 
 /** Frozen wording. Bump whenever instructions, questions or state shape change. */
-export const QUESTION_VERSION = "decision/v1";
+export const QUESTION_VERSION = "decision/v2";
 
 export interface PreviousStep {
   readonly action_id: string | null;
@@ -47,11 +41,15 @@ export interface DecisionState {
   readonly task: {
     readonly name: string;
     readonly description: string;
+    readonly phase: string;
     readonly stage: number;
     readonly stages: number;
+    readonly instruction: string | null;
     readonly goal: Readonly<Record<string, number>>;
     readonly remaining: Readonly<Record<string, number>>;
+    /** True only when the whole task is complete. */
     readonly reached: boolean;
+    readonly metrics: Readonly<Record<string, unknown>>;
   };
   readonly robot: {
     readonly backend: string;
@@ -70,47 +68,42 @@ export interface DecisionState {
 export interface StateInput {
   readonly obs: Observation;
   readonly task: ResolvedTask;
-  readonly stage: number;
+  readonly view: TrackerView;
   readonly limits: Limits;
   readonly previous: PreviousStep;
   readonly progress: Progress;
   readonly detections?: readonly Detection[];
-  /** Task-level completion when no goal pose remains (every stage done, or a verified grasp). */
-  readonly complete?: boolean;
 }
 
-export const decisionState = (input: StateInput): DecisionState => {
-  const goal = input.task.stages[input.stage] ?? {};
-  const hasGoal = Object.keys(goal).length > 0;
-  return {
-    question_version: QUESTION_VERSION,
-    task: {
-      name: input.task.name,
-      description: input.task.description,
-      stage: input.stage + 1,
-      stages: input.task.stages.length,
-      goal,
-      remaining: remaining(input.obs, goal),
-      reached: hasGoal
-        ? reached(input.obs, goal, input.limits)
-        : input.complete === true,
-    },
-    robot: {
-      backend: input.obs.backend,
-      measured: input.obs.measured,
-      fault: input.obs.fault,
-      control_owner: input.obs.operator?.owner ?? null,
-      motion_in_progress:
-        input.obs.operation?.status === "accepted" ||
-        input.obs.operation?.status === "running",
-      observation_seq: input.obs.seq,
-    },
-    freshness: freshness(input.obs, input.limits),
-    detections: input.detections ?? [],
-    previous: input.previous,
-    progress: input.progress,
-  };
-};
+export const decisionState = (input: StateInput): DecisionState => ({
+  question_version: QUESTION_VERSION,
+  task: {
+    name: input.task.name,
+    description: input.task.description,
+    phase: input.view.phase,
+    stage: input.view.stage,
+    stages: input.view.stages,
+    instruction: input.view.instruction,
+    goal: input.view.goal,
+    remaining: remaining(input.obs, input.view.goal),
+    reached: input.view.complete,
+    metrics: input.view.metrics,
+  },
+  robot: {
+    backend: input.obs.backend,
+    measured: input.obs.measured,
+    fault: input.obs.fault,
+    control_owner: input.obs.operator?.owner ?? null,
+    motion_in_progress:
+      input.obs.operation?.status === "accepted" ||
+      input.obs.operation?.status === "running",
+    observation_seq: input.obs.seq,
+  },
+  freshness: freshness(input.obs, input.limits),
+  detections: input.detections ?? [],
+  previous: input.previous,
+  progress: input.progress,
+});
 
 /** Candidate descriptions as Jev criteria: option ID → what it does. */
 export const criteriaOf = (offered: readonly Action[]) =>

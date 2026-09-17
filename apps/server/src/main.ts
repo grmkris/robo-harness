@@ -22,7 +22,6 @@ import {
 } from "./decision/runner";
 import { spendSummary } from "./decision/spend";
 import { strategyNames } from "./decision/strategies";
-import { TaskName } from "./decision/tasks";
 import { decode, isUuid, Uuid } from "./decode";
 import { budget, setBudget, perceptionConfig } from "./perception";
 import { perceptionHistory, perceptionDetail } from "./perception-history";
@@ -466,20 +465,9 @@ async function handle(req: Request): Promise<Response | undefined> {
       });
     }
     if (path === "/api/decision/observe" && req.method === "POST") {
-      const body = decode(
-        Schema.Struct({
-          task: TaskName.pipe(
-            Schema.withDecodingDefaultKey(
-              Effect.succeed("control-smoke" as const)
-            )
-          ),
-          goal: Schema.optionalKey(
-            Schema.String.check(Schema.isMaxLength(200))
-          ),
-        }),
-        await parse(req)
+      return json(
+        await previewDecision(decode(DecisionRunRequest, await parse(req)))
       );
-      return json(await previewDecision(body.task, body.goal));
     }
     if (path === "/api/decision/smoke" && req.method === "POST") {
       requireHuman(principal);

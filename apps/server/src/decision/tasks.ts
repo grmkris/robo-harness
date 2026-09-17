@@ -2,7 +2,9 @@ import { joints } from "@robo/domain";
 import type { Joint, Observation } from "@robo/domain";
 import { Schema } from "effect";
 
-import type { CandidateSpec, Goal } from "./candidates";
+import type { ActionResult } from "../motion-actions";
+import { reached, type Goal, type Limits, type StepAction } from "./candidates";
+import type { Detection } from "./state";
 
 export const TaskName = Schema.Literals([
   "control-smoke",
@@ -101,7 +103,77 @@ export const resolveTask = (
   };
 };
 
-export const specFor = (task: ResolvedTask, stage: number): CandidateSpec => ({
-  goal: task.stages[stage] ?? {},
-  explore: task.explore,
-});
+/** What the decider sees about task progress this cycle. */
+export interface TrackerView {
+  /** Phase or stage label, e.g. "stage 2/3" or "center". */
+  readonly phase: string;
+  /** 1-based position and total, for display and logs. */
+  readonly stage: number;
+  readonly stages: number;
+  readonly instruction: string | null;
+  /** Joint reference for this phase; empty when the phase is perceptual. */
+  readonly goal: Goal;
+  /** Joints offered in both directions when they have no reference. */
+  readonly explore: readonly Joint[];
+  readonly complete: boolean;
+  /** Set when the task cannot succeed in this run. */
+  readonly failed: string | null;
+  readonly reachedCount: number;
+  /** Phases or stages completed since the previous view. */
+  readonly transitions: readonly Readonly<Record<string, unknown>>[];
+  readonly metrics: Readonly<Record<string, unknown>>;
+}
+
+export interface StepOutcome {
+  readonly action: StepAction;
+  readonly status: ActionResult["status"];
+  readonly before: Observation;
+  readonly after: Observation | null;
+}
+
+export interface TaskTracker {
+  readonly advance: (
+    obs: Observation,
+    detections: readonly Detection[]
+  ) => TrackerView;
+  /** An expected failure (e.g. a close blocked by the object) does not count toward stopping. */
+  readonly onStep?: (outcome: StepOutcome) => {
+    readonly expected: boolean;
+    readonly note: string | null;
+  };
+}
+
+/** Ordered joint goals; the run advances when a stage is reached. */
+export const stageTracker = (
+  task: ResolvedTask,
+  limits: Limits
+): TaskTracker => {
+  let stage = 0;
+  return {
+    advance: (obs) => {
+      const transitions: Record<string, unknown>[] = [];
+      while (
+        stage < task.stages.length &&
+        reached(obs, task.stages[stage] ?? {}, limits)
+      ) {
+        stage += 1;
+        transitions.push({ stage });
+      }
+      const complete = stage >= task.stages.length;
+      const shown = Math.min(stage, Math.max(0, task.stages.length - 1));
+      return {
+        phase: `stage ${shown + 1}/${task.stages.length}`,
+        stage: shown + 1,
+        stages: task.stages.length,
+        instruction: null,
+        goal: complete ? {} : (task.stages[stage] ?? {}),
+        explore: task.explore,
+        complete,
+        failed: null,
+        reachedCount: stage,
+        transitions,
+        metrics: {},
+      };
+    },
+  };
+};

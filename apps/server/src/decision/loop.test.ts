@@ -10,9 +10,9 @@ import {
 } from "../motion-actions";
 import { defaultLimits } from "./candidates";
 import { fixtureObservation } from "./fixtures";
-import { runDecisionLoop, type LoopDeps } from "./loop";
+import { runDecisionLoop, type LoopDeps, type LoopOptions } from "./loop";
 import { rulesDecider } from "./strategies";
-import { resolveTask } from "./tasks";
+import { resolveTask, stageTracker } from "./tasks";
 
 /** A fake motor owner: moves complete instantly unless told to lose replies or hold. */
 const rig = (mode: "normal" | "lost" | "fail" = "normal") => {
@@ -113,17 +113,21 @@ const rig = (mode: "normal" | "lost" | "fail" = "normal") => {
 const task = () =>
   resolveTask("control-smoke", fixtureObservation({ backend: "mock" }));
 const options = (
-  over: Partial<Parameters<typeof runDecisionLoop>[1]> = {}
-) => ({
-  runId: "run",
-  mode: "execute" as const,
-  task: task(),
-  limits: defaultLimits,
-  maxSteps: 20,
-  maxSeconds: 30,
-  signal: new AbortController().signal,
-  ...over,
-});
+  over: Partial<Omit<LoopOptions, "tracker" | "task">> = {}
+): LoopOptions => {
+  const resolved = task();
+  return {
+    runId: "run",
+    mode: "execute",
+    task: resolved,
+    tracker: stageTracker(resolved, defaultLimits),
+    limits: defaultLimits,
+    maxSteps: 20,
+    maxSeconds: 30,
+    signal: new AbortController().signal,
+    ...over,
+  };
+};
 
 test("dry-run never reaches the executor", async () => {
   const r = rig();

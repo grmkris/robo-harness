@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 
+import type { Observation } from "@robo/domain";
 import { Effect, Schema } from "effect";
 
 import { running as chatsRunning } from "../chat-runs";
@@ -13,11 +14,19 @@ import { jevEvaluator, jevRate, memoryMeter } from "./jev";
 import { runDecisionLoop } from "./loop";
 import { mockEvaluator } from "./mock";
 import { pickupPerception } from "./perception";
+import { pickupDefaults, pickupTracker } from "./pickup";
 import { sceneConfig } from "./scene";
 import { sqliteMeter } from "./spend";
 import { QUESTION_VERSION } from "./state";
 import { deciderFor, strategyNames } from "./strategies";
-import { resolveTask, specFor, TaskName } from "./tasks";
+import {
+  parseGoal,
+  resolveTask,
+  stageTracker,
+  TaskName,
+  type ResolvedTask,
+  type TaskTracker,
+} from "./tasks";
 
 const withDefault = <S extends Schema.Top>(schema: S, value: S["Type"]) =>
   schema.pipe(Schema.withDecodingDefaultKey(Effect.succeed(value)));
@@ -29,12 +38,23 @@ export const DecisionRunRequest = Schema.Struct({
   mode: withDefault(Schema.Literals(["dry-run", "execute"]), "dry-run"),
   goal: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   max_steps: withDefault(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 })),
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 300 })),
     10
   ),
   max_seconds: withDefault(
-    Schema.Finite.check(Schema.isBetween({ minimum: 1, maximum: 600 })),
+    Schema.Finite.check(Schema.isBetween({ minimum: 1, maximum: 900 })),
     60
+  ),
+  /** Pickup: absolute reviewed hover pose, e.g. "shoulder_pan=-8.9,shoulder_lift=-0.9,elbow_flex=6.5,wrist_flex=84.5". */
+  hover: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  /** Pickup: model gripper-frame z (m) to descend to. */
+  grasp_z: Schema.optionalKey(
+    Schema.Finite.check(Schema.isBetween({ minimum: -0.2, maximum: 0.3 }))
+  ),
+  /** Pickup: "x,y" where the piece appears in the wrist image when held between the jaws. */
+  grasp_point: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(40))),
+  open_percent: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 10, maximum: 90 }))
   ),
   supervised: withDefault(Schema.Boolean, false),
   scene: withDefault(Schema.Boolean, false),
@@ -52,9 +72,53 @@ export const DecisionRunRequest = Schema.Struct({
 });
 export type DecisionRunRequest = typeof DecisionRunRequest.Type;
 
-/** Supervised envelope for the real arm, per the experiment brief. */
-const REAL_MAX_STEPS = 20;
-const REAL_MAX_SECONDS = 60;
+/**
+ * Supervised envelopes for the real arm. The brief's 20 steps / 60 s covers
+ * control smokes; a pickup is ~150 bounded steps, so the operator approved a
+ * larger envelope for that task only (2026-09-17).
+ */
+const realEnvelope: Record<TaskName, { steps: number; seconds: number }> = {
+  "control-smoke": { steps: 20, seconds: 60 },
+  "pickup-white-piece": { steps: 250, seconds: 720 },
+};
+
+const parsePoint = (text: string) => {
+  const match =
+    /^\s*(?<x>-?\d+(?:\.\d+)?)\s*,\s*(?<y>-?\d+(?:\.\d+)?)\s*$/u.exec(text);
+  const x = Number(match?.groups?.["x"]);
+  const y = Number(match?.groups?.["y"]);
+  if (!match || Math.abs(x) > 1 || Math.abs(y) > 1) {
+    throw new Error(`grasp_point must be "x,y" in [-1, 1], got "${text}"`);
+  }
+  return { x, y };
+};
+
+const trackerFor = (
+  request: DecisionRunRequest,
+  task: ResolvedTask,
+  obs: Observation
+): TaskTracker => {
+  if (task.name !== "pickup-white-piece") {
+    return stageTracker(task, defaultLimits);
+  }
+  if (request.hover === undefined || request.grasp_z === undefined) {
+    throw new Error(
+      "pickup-white-piece needs a reviewed hover pose and grasp_z"
+    );
+  }
+  if (/[+-]=/u.test(request.hover)) {
+    throw new Error("hover must be absolute joint values (joint=N)");
+  }
+  return pickupTracker({
+    ...pickupDefaults,
+    hover: parseGoal(request.hover, obs),
+    graspZ: request.grasp_z,
+    graspPoint: request.grasp_point
+      ? parsePoint(request.grasp_point)
+      : pickupDefaults.graspPoint,
+    openPercent: request.open_percent ?? pickupDefaults.openPercent,
+  });
+};
 
 interface RunHandle {
   readonly abort: AbortController;
@@ -85,13 +149,29 @@ export const closeDecisionRuns = async () => {
   await Promise.all(active.map((run) => run.done));
 };
 
-/** Read-only preview: the state a decision would see now, with no model call. */
-export const previewDecision = async (
-  task: TaskName,
-  goal: string | undefined
-) => {
+/** Read-only preview: the state a decision would see now, with no model call or motion. */
+export const previewDecision = async (request: DecisionRunRequest) => {
   const obs = await robot.motionIO.observe(AbortSignal.timeout(3000));
-  const resolved = resolveTask(task, obs, goal);
+  let task;
+  let tracker;
+  try {
+    task = resolveTask(request.task, obs, request.goal);
+    tracker = trackerFor(request, task, obs);
+  } catch (error) {
+    throw new robot.ApiError(
+      error instanceof Error ? error.message : "Invalid task",
+      422
+    );
+  }
+  const detections =
+    task.name === "pickup-white-piece"
+      ? await pickupPerception({
+          capture: (camera) => robot.capture(camera),
+          scene: null,
+          sceneEvery: 1,
+        }).perceive(obs, AbortSignal.timeout(5000))
+      : [];
+  const view = tracker.advance(obs, detections);
   return {
     backend: obs.backend,
     boot_id: obs.boot_id,
@@ -99,10 +179,20 @@ export const previewDecision = async (
     fault: obs.fault,
     operator: obs.operator,
     measured: obs.measured,
-    task: resolved,
-    candidates: candidates(obs, specFor(resolved, 0), defaultLimits).map(
-      (action) => action.id
-    ),
+    ee_xyz_m: obs.ee.slice(0, 3),
+    task: {
+      name: task.name,
+      phase: view.phase,
+      goal: view.goal,
+      instruction: view.instruction,
+    },
+    metrics: view.metrics,
+    detections,
+    candidates: candidates(
+      obs,
+      { goal: view.goal, explore: view.explore },
+      defaultLimits
+    ).map((action) => action.id),
     motor_writes: 0,
   };
 };
@@ -142,19 +232,22 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
         403
       );
     }
+    const envelope = realEnvelope[request.task];
     if (
-      request.max_steps > REAL_MAX_STEPS ||
-      request.max_seconds > REAL_MAX_SECONDS
+      request.max_steps > envelope.steps ||
+      request.max_seconds > envelope.seconds
     ) {
       throw new robot.ApiError(
-        `Supervised trial envelope is at most ${REAL_MAX_STEPS} steps and ${REAL_MAX_SECONDS} s`,
+        `Supervised ${request.task} envelope is at most ${envelope.steps} steps and ${envelope.seconds} s`,
         403
       );
     }
   }
   let task;
+  let tracker;
   try {
     task = resolveTask(request.task, first, request.goal);
+    tracker = trackerFor(request, task, first);
   } catch (error) {
     throw new robot.ApiError(
       error instanceof Error ? error.message : "Invalid goal",
@@ -225,12 +318,7 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
             log(event, data);
           },
           sleep: (ms) => Bun.sleep(ms),
-          ...(perception
-            ? {
-                perceive: perception.perceive,
-                perceivedComplete: perception.complete,
-              }
-            : {}),
+          ...(perception ? { perceive: perception.perceive } : {}),
           onOffered: (next) => {
             offered = next;
           },
@@ -239,6 +327,7 @@ export const startDecisionRun = async (request: DecisionRunRequest) => {
           runId,
           mode: request.mode,
           task,
+          tracker,
           limits: defaultLimits,
           maxSteps: request.max_steps,
           maxSeconds: request.max_seconds,

@@ -159,16 +159,18 @@ test("an answer outside the offered actions never becomes an action", async () =
     { goal: item.goal, explore: [] },
     defaultLimits
   );
+  const task = {
+    name: "control-smoke" as const,
+    description: "",
+    stages: [item.goal],
+    explore: [],
+    start: item.obs.measured,
+  };
+  const { stageTracker } = await import("./tasks");
   const state = decisionState({
     obs: item.obs,
-    task: {
-      name: "control-smoke",
-      description: "",
-      stages: [item.goal],
-      explore: [],
-      start: item.obs.measured,
-    },
-    stage: 0,
+    task,
+    view: stageTracker(task, defaultLimits).advance(item.obs, []),
     limits: defaultLimits,
     previous: item.previous,
     progress: {

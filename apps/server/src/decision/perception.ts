@@ -76,18 +76,5 @@ export const pickupPerception = (options: PerceptionOptions) => {
     if (lastScene) detections.push({ ...lastScene, described_at_step: step });
     return detections;
   };
-  /** Complete only on converging evidence: stalled closing, piece in the wrist view, and (when enabled) the scene says lifted. */
-  const complete = (detections: readonly Detection[]) => {
-    const grasp = detections.find((d) => d.source === "grasp-check/v1");
-    const blob = detections.find((d) => d.source === "white-blob/v1");
-    const scene = detections.find(
-      (d) => d.source.startsWith("scene/") && d["ok"] === true
-    );
-    return (
-      grasp?.["likely_holding"] === true &&
-      blob?.["visible"] === true &&
-      (options.scene === null || scene?.["piece_lifted"] === true)
-    );
-  };
-  return { perceive, complete };
+  return { perceive };
 };

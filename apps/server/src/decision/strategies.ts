@@ -41,6 +41,80 @@ const INSTRUCTIONS =
 
 const isStep = (action: Action): action is StepAction => action.kind === "step";
 
+/** Pickup metrics the rules baseline reads (written by the pickup tracker). */
+interface PickupMetrics {
+  readonly blob_visible?: boolean;
+  readonly blob_dx?: number | null;
+  readonly blob_dy?: number | null;
+  readonly center_tolerance?: number;
+  readonly blob_change_since_last_step?: {
+    readonly dx: number;
+    readonly dy: number;
+  } | null;
+}
+
+const stepFor = (
+  offered: readonly Action[],
+  joint: Joint,
+  sign: number
+): string | null =>
+  offered
+    .filter(isStep)
+    .find(
+      (action) => action.joint === joint && Math.sign(action.delta) === sign
+    )?.id ?? null;
+
+/**
+ * Visual servo baseline for the pickup phases: pan corrects image x, elbow
+ * corrects image y. The direction is inferred from how the previous step on
+ * the same joint moved the piece; without that it probes the positive side.
+ */
+const pickupRule = (input: DecideInput): string => {
+  const { state, offered } = input;
+  const m = state.task.metrics as PickupMetrics;
+  const phase = state.task.phase;
+  if (phase === "lift") {
+    return stepFor(offered, "shoulder_lift", -1) ?? "stop";
+  }
+  if (
+    !m.blob_visible ||
+    m.blob_dx === null ||
+    m.blob_dx === undefined ||
+    m.blob_dy === null ||
+    m.blob_dy === undefined
+  ) {
+    return state.previous.action_id === "reobserve" ? "stop" : "reobserve";
+  }
+  const tolerance = m.center_tolerance ?? 0.06;
+  const dx = m.blob_dx;
+  const dy = m.blob_dy;
+  if (
+    phase === "descend" &&
+    Math.abs(dx) <= 2 * tolerance &&
+    Math.abs(dy) <= 2 * tolerance
+  ) {
+    return stepFor(offered, "shoulder_lift", 1) ?? "stop";
+  }
+  const useX = Math.abs(dx) >= Math.abs(dy);
+  const joint: Joint = useX ? "shoulder_pan" : "elbow_flex";
+  const error = useX ? dx : dy;
+  const previous = state.previous.action_id ?? "";
+  const change = m.blob_change_since_last_step;
+  let sign = 1;
+  if (previous.startsWith(joint) && change) {
+    const moved = useX ? change.dx : change.dy;
+    const stepSign = previous.includes("-") ? -1 : 1;
+    if (Math.abs(moved) > 0.005) {
+      sign = -Math.sign(error) * Math.sign(moved) * stepSign;
+    }
+  }
+  return (
+    stepFor(offered, joint, sign) ??
+    stepFor(offered, joint, -sign) ??
+    "reobserve"
+  );
+};
+
 /**
  * Rules baseline over the same state and candidates: stop on fault or repeated
  * failure; reobserve when unusable or right after a failed step; done when
@@ -48,6 +122,15 @@ const isStep = (action: Action): action is StepAction => action.kind === "step";
  */
 export const rulesChoice = (input: DecideInput): string => {
   const { state, offered } = input;
+  if (
+    ["center", "descend", "lift"].includes(state.task.phase) &&
+    !state.robot.fault &&
+    state.freshness.usable &&
+    state.progress.consecutive_failures < 2 &&
+    !state.task.reached
+  ) {
+    return pickupRule(input);
+  }
   const lastStepFailed =
     state.previous.verdict === "valid" &&
     /^(?:failed|cancelled|refused)/u.test(state.previous.outcome ?? "");

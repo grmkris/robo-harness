@@ -83,22 +83,24 @@ test("scene replies are parsed strictly and failures stay short", async () => {
   expect(bad["ok"]).toBe(false);
 });
 
-test("pickup completes only with a stalled grip and the piece in view", async () => {
+test("pickup perception reports the wrist blob and the gripper stall evidence", async () => {
   const perception = pickupPerception({
     capture: (camera) => Promise.resolve(frame(camera, [260, 300, 380, 460])),
     scene: null,
     sceneEvery: 5,
   });
-  const signal = new AbortController().signal;
   const open = fixtureObservation();
-  expect(perception.complete(await perception.perceive(open, signal))).toBe(
-    false
+  const detections = await perception.perceive(
+    fixtureObservation({
+      measured: { ...open.measured, gripper: 12 },
+      commanded: { ...open.commanded, gripper: 4 },
+    }),
+    new AbortController().signal
   );
-  const holding = fixtureObservation({
-    measured: { ...open.measured, gripper: 12 },
-    commanded: { ...open.commanded, gripper: 4 },
-  });
-  expect(perception.complete(await perception.perceive(holding, signal))).toBe(
-    true
-  );
+  expect(
+    detections.find((d) => d.source === "white-blob/v1")?.["visible"]
+  ).toBe(true);
+  expect(
+    detections.find((d) => d.source === "grasp-check/v1")?.["likely_holding"]
+  ).toBe(true);
 });

@@ -7,13 +7,7 @@ import type {
   MotionProgress,
 } from "../motion-actions";
 import { ToolFailure } from "../tool-errors";
-import {
-  candidates,
-  reached,
-  validate,
-  type Action,
-  type Limits,
-} from "./candidates";
+import { candidates, validate, type Action, type Limits } from "./candidates";
 import { DecideFailure } from "./jev";
 import {
   decisionState,
@@ -22,7 +16,7 @@ import {
   type PreviousStep,
 } from "./state";
 import type { Decider } from "./strategies";
-import { specFor, type ResolvedTask } from "./tasks";
+import type { ResolvedTask, TaskTracker } from "./tasks";
 
 export interface LoopDeps {
   readonly observe: (signal: AbortSignal) => Promise<Observation>;
@@ -35,11 +29,6 @@ export interface LoopDeps {
     obs: Observation,
     signal: AbortSignal
   ) => Promise<readonly Detection[]>;
-  /** Whether perception shows the task complete (e.g. a verified grasp). */
-  readonly perceivedComplete?: (
-    detections: readonly Detection[],
-    obs: Observation
-  ) => boolean;
   /** Observed by mock deciders that need the offered set. */
   readonly onOffered?: (offered: readonly Action[]) => void;
 }
@@ -48,6 +37,8 @@ export interface LoopOptions {
   readonly runId: string;
   readonly mode: "dry-run" | "execute";
   readonly task: ResolvedTask;
+  /** Decides goals, phases and completion from each observation. */
+  readonly tracker: TaskTracker;
   readonly limits: Limits;
   readonly maxSteps: number;
   readonly maxSeconds: number;
@@ -115,7 +106,7 @@ export const runDecisionLoop = async (
   let failures = 0;
   let deciderFailures = 0;
   let observeFailures = 0;
-  let stage = 0;
+  let stagesReached = 0;
   let complete = false;
   let cost = 0;
   let endReason = "max_steps";
@@ -157,28 +148,32 @@ export const runDecisionLoop = async (
       continue;
     }
 
-    while (
-      stage < task.stages.length &&
-      reached(basis, task.stages[stage] ?? {}, limits)
-    ) {
+    const detections = deps.perceive ? await deps.perceive(basis, signal) : [];
+    const view = options.tracker.advance(basis, detections);
+    for (const transition of view.transitions) {
       deps.log("stage_reached", {
         step,
-        stage: stage + 1,
+        ...transition,
         measured: basis.measured,
       });
-      stage += 1;
     }
-    const detections = deps.perceive ? await deps.perceive(basis, signal) : [];
-    complete =
-      task.stages.length > 0
-        ? stage >= task.stages.length
-        : (deps.perceivedComplete?.(detections, basis) ?? false);
-    const offered = candidates(basis, specFor(task, stage), limits);
+    stagesReached = view.reachedCount;
+    complete = view.complete;
+    if (view.failed) {
+      deps.log("task_failed", { step, phase: view.phase, reason: view.failed });
+      endReason = `task_failed: ${view.failed}`;
+      break;
+    }
+    const offered = candidates(
+      basis,
+      { goal: view.goal, explore: view.explore },
+      limits
+    );
     deps.onOffered?.(offered);
     const state = decisionState({
       obs: basis,
       task,
-      stage: Math.min(stage, Math.max(0, task.stages.length - 1)),
+      view,
       limits,
       previous,
       progress: {
@@ -189,12 +184,13 @@ export const runDecisionLoop = async (
         consecutive_failures: failures,
       },
       detections,
-      complete,
     });
     const record = {
       step,
       mode: options.mode,
       stage: state.task.stage,
+      phase: view.phase,
+      metrics: view.metrics,
       observation: summarize(basis),
       freshness: state.freshness,
       remaining: state.task.remaining,
@@ -256,7 +252,7 @@ export const runDecisionLoop = async (
     }
 
     if (action.kind === "stop" || action.kind === "done") {
-      if (action.kind === "done" && !complete && !state.task.reached) {
+      if (action.kind === "done" && !complete) {
         deps.log("step", {
           ...logged,
           verdict: "refused: task not complete",
@@ -432,8 +428,16 @@ export const runDecisionLoop = async (
             )
         )
       : null;
+    const hook = options.tracker.onStep?.({
+      action,
+      status: result.status,
+      before: now,
+      after,
+    }) ?? { expected: false, note: null };
     if (result.status === "completed") {
       counts.completed += 1;
+      failures = 0;
+    } else if (hook.expected) {
       failures = 0;
     } else if (result.status !== "unknown") {
       counts.failed += 1;
@@ -443,6 +447,7 @@ export const runDecisionLoop = async (
       ...logged,
       verdict: "valid",
       move,
+      task_note: hook.note,
       request_id: result.request_id,
       operation_id: result.operation?.id ?? null,
       outcome: result.status,
@@ -477,7 +482,7 @@ export const runDecisionLoop = async (
   return {
     end_reason: endReason,
     ...counts,
-    stages_reached: Math.min(stage, task.stages.length),
+    stages_reached: stagesReached,
     task_complete: complete,
     cost_usd: cost,
   };
