@@ -34,8 +34,8 @@ test("steps are capped by the local step and the robot max_step", () => {
     defaultLimits
   );
   expect(motion(offered.map((action) => action.id))).toEqual([
-    "gripper+1",
-    "gripper-1",
+    "gripper+0.8",
+    "gripper-0.8",
   ]);
 });
 
@@ -46,8 +46,8 @@ test("validation refuses drift, restarts, foreign control, limits and unoffered 
     { goal: { gripper: 34 }, explore: [] },
     defaultLimits
   );
-  const step = offered.find((action) => action.id === "gripper+2");
-  if (step?.kind !== "step") throw new Error("expected gripper+2");
+  const step = offered.find((action) => action.id === "gripper+1.8");
+  if (step?.kind !== "step") throw new Error("expected gripper+1.8");
   expect(validate(step, offered, basis, basis, defaultLimits)).toEqual({
     ok: true,
   });

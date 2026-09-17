@@ -61,6 +61,9 @@ export interface Freshness {
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
 
+/** Headroom under the step cap for measurement jitter between decision and execution. */
+const STEP_MARGIN = 0.2;
+
 const tolerance = (joint: Joint, limits: Limits) =>
   joint === "gripper" ? limits.gripperTolerance : limits.toleranceDeg;
 
@@ -149,7 +152,10 @@ const step = (
   if (delta === 0 || target < low || target > high) {
     return null;
   }
-  const durationS = round(Math.max(1, Math.abs(delta) / limits.speedPerS));
+  // Plan below the speed cap too, so the executor's fresh measurement cannot tip it over.
+  const durationS =
+    Math.ceil(Math.max(1, Math.abs(delta) / (limits.speedPerS * 0.9)) * 10) /
+    10;
   const unit = joint === "gripper" ? "%" : "deg";
   const signed = `${delta > 0 ? "+" : ""}${round(delta)}`;
   return {
@@ -174,7 +180,13 @@ export const candidates = (
 ): Action[] => {
   const out: Action[] = [];
   if (freshness(obs, limits).usable) {
-    const size = Math.min(limits.stepDeg, obs.max_step);
+    // A step is measured again from a fresher observation by the executor and the
+    // motor owner (exactly <= max_step). Sensor jitter of ~0.1 unit would refuse a
+    // full-size step, so candidates keep a margin.
+    const size = Math.max(
+      0.1,
+      Math.min(limits.stepDeg, obs.max_step) - STEP_MARGIN
+    );
     for (const joint of joints) {
       const target = spec.goal[joint];
       if (target !== undefined) {

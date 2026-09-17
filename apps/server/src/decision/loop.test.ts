@@ -154,8 +154,8 @@ test("execute walks every stage with measured completion, then finishes done", a
   expect(summary.task_complete).toBe(true);
   expect(summary.stages_reached).toBe(3);
   expect(summary.completed).toBe(r.calls.submit);
-  expect(r.measured().gripper).toBe(34);
-  expect(r.measured().wrist_flex).toBe(41);
+  expect(Math.abs(r.measured().gripper - 34)).toBeLessThanOrEqual(1);
+  expect(Math.abs(r.measured().wrist_flex - 41)).toBeLessThanOrEqual(0.8);
 });
 
 test("an unknown outcome ends the run without resubmitting", async () => {

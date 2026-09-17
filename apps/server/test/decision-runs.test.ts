@@ -42,7 +42,7 @@ test("observe previews candidates without motion", async () => {
   const body = await response.json();
   expect(response.status).toBe(200);
   expect(body.backend).toBe("mock");
-  expect(body.candidates).toContain("gripper+2");
+  expect(body.candidates).toContain("gripper+1.8");
   expect(body.motor_writes).toBe(0);
 }, 90_000);
 

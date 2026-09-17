@@ -89,13 +89,13 @@ const fixture = (
 
 export const fixtures: readonly Fixture[] = [
   fixture("clear-gripper-step", fixtureObservation(), { gripper: 34 }, [
-    "gripper+2",
+    "gripper+1.8",
   ]),
   fixture(
     "two-joints-either-toward",
     fixtureObservation(),
     { shoulder_pan: 5.5, gripper: 34 },
-    ["shoulder_pan+2", "gripper+2"]
+    ["shoulder_pan+1.8", "gripper+1.8"]
   ),
   fixture(
     "last-partial-step",
