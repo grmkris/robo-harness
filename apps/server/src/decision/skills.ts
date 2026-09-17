@@ -124,6 +124,8 @@ export interface SkillContext {
   readonly config: SkillConfig;
   readonly memory: SkillMemory;
   readonly maxMoves: number;
+  /** performance.now() past which no further move may start. */
+  readonly deadlineMs: number;
   readonly signal: AbortSignal;
 }
 
@@ -161,9 +163,11 @@ export const centered = (
 };
 
 class MoveBudget extends Error {
-  constructor() {
-    super("move budget used");
+  readonly why: "moves" | "deadline";
+  constructor(why: "moves" | "deadline" = "moves") {
+    super(why === "moves" ? "move budget used" : "run deadline reached");
     this.name = "MoveBudget";
+    this.why = why;
   }
 }
 
@@ -197,6 +201,8 @@ const stepToward = async (
     return { obs, reached: true, progressed: false, outcome: null };
   }
   if (ctx.memory.movesUsed >= ctx.maxMoves) throw new MoveBudget();
+  // A long skill must respect the run's wall clock, not just its turns.
+  if (performance.now() >= ctx.deadlineMs) throw new MoveBudget("deadline");
   const scale = Math.min(1, ctx.config.moveCapDeg / largest);
   const target: Partial<Record<Joint, number>> = {};
   for (const [joint, delta] of deltas) {
@@ -834,7 +840,12 @@ export const runSkill = async (
     }
   } catch (error) {
     if (error instanceof MoveBudget)
-      return result(skill, "failed", "run move budget used", 0);
+      return result(
+        skill,
+        "failed",
+        error.why === "moves" ? "run move budget used" : "run deadline reached",
+        0
+      );
     throw error;
   }
 };

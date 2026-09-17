@@ -129,7 +129,7 @@ const hover = {
 };
 const matPiece = (x: number, y: number): Vec3 => [x, y, config.matZ + 0.0125];
 
-const runWith = async (tactician: Tactician, piece: Vec3) => {
+const runWith = async (tactician: Tactician, piece: Vec3, maxSeconds = 120) => {
   const sim = simulate(piece, hover);
   const events: { event: string; data: Record<string, unknown> }[] = [];
   const summary = await runSkillLoop(
@@ -144,7 +144,7 @@ const runWith = async (tactician: Tactician, piece: Vec3) => {
       mode: "execute",
       config,
       maxMoves: 400,
-      maxSeconds: 120,
+      maxSeconds,
       maxJudgments: 60,
       signal: new AbortController().signal,
     }
@@ -241,4 +241,18 @@ test("code vetoes: done is refused until lifted, close is refused when high", as
         e.data["result"] === "vetoed"
     )
   ).toBe(true);
+});
+
+test("a skill stops at the run's wall-clock deadline instead of finishing its own loop", async () => {
+  // The simulated arm moves in microseconds, so the deadline has to be
+  // effectively immediate to be reached mid-skill.
+  const { summary, events, sim } = await runWith(
+    rulesTactician(),
+    matPiece(0.3, 0.14),
+    0.0005
+  );
+  const first = events.find((e) => e.event === "skill_finished");
+  expect(first?.data["detail"]).toBe("run deadline reached");
+  expect(summary.end_reason).toBe("max_seconds");
+  expect(sim.moves()).toBeLessThan(20);
 });

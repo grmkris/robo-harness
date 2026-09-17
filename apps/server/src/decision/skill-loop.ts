@@ -177,6 +177,7 @@ export const runSkillLoop = async (
           config: options.config,
           memory,
           maxMoves: options.maxMoves,
+          deadlineMs: started + options.maxSeconds * 1000,
           signal: options.signal,
         },
         chosen
