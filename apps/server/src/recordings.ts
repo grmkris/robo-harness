@@ -50,6 +50,8 @@ const known = new Set<string>();
 // seconds (2026-09-17). Only a miss that persists this many consecutive
 // samples -- five seconds at 10 Hz -- ends the recording.
 const MISS_LIMIT = 50;
+// Below this achieved sample rate a recording is not worth replaying.
+const MIN_FPS = 4;
 let consecutiveMisses = 0;
 /** A miss worth counting and retrying, as opposed to a reason to stop. */
 class TransientMiss extends Error {}
@@ -282,13 +284,22 @@ async function finalizeRecording() {
     await readFile(`${record.path}/manifest.json`, "utf-8")
   );
   record.finished = Date.now();
+  // One observation per successful poll is the real ceiling: the tailnet round
+  // trip to the motor owner is about 160 ms, so the 10 Hz target cannot be met
+  // and overlapping polls are backpressure rather than lost data. Judge the
+  // recording on the rate it achieved, and report both.
+  const seconds = Math.max(0.001, (record.finished - record.created) / 1000);
+  const achieved = record.frames / seconds;
   record.state =
     record.state === "incomplete"
       ? "incomplete"
-      : skipped
-        ? "incomplete"
-        : "captured";
-  record.error ??= skipped ? `${skipped} sample deadlines were missed` : null;
+      : achieved >= MIN_FPS
+        ? "captured"
+        : "incomplete";
+  record.error ??=
+    achieved >= MIN_FPS
+      ? null
+      : `Recorded ${achieved.toFixed(1)} samples per second, below the ${MIN_FPS} floor (${skipped} missed)`;
   await writeFile(
     `${record.path}/manifest.json.tmp`,
     JSON.stringify(
@@ -297,6 +308,7 @@ async function finalizeRecording() {
         state: record.state,
         frames: record.frames,
         finished: record.finished,
+        sampling_fps_achieved: Number(achieved.toFixed(2)),
         missed_samples: skipped,
         error: record.error,
       },

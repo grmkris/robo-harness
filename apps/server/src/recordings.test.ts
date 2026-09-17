@@ -1,5 +1,6 @@
 import { expect, mock, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -66,9 +67,16 @@ test("a transient stale observation is counted, not fatal", async () => {
   await recordings.recordSample();
   expect(record.frames).toBe(2);
 
+  // The misses are reported in the manifest, but a recording that kept
+  // sampling is still captured.
   const stopped = await recordings.stopRecording();
-  expect(stopped.state).toBe("incomplete");
-  expect(stopped.error).toContain("20 sample deadlines were missed");
+  expect(stopped.state).toBe("captured");
+  expect(stopped.error).toBeNull();
+  const manifest = JSON.parse(
+    await readFile(`${stopped.path}/manifest.json`, "utf-8")
+  ) as { missed_samples: number; sampling_fps_achieved: number };
+  expect(manifest.missed_samples).toBe(20);
+  expect(manifest.sampling_fps_achieved).toBeGreaterThan(0);
 });
 
 test("a stale observation that never recovers ends the recording", async () => {
