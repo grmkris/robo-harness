@@ -11,7 +11,7 @@
  *   bun run jev --status | --cancel ID
  *
  * Run options: --task control-smoke|pickup-white-piece  --strategy choice|parallel|critic|rules
- *   --mock (SDK mock instead of Jev)  --goal joint=+4,...  --max-steps N  --max-seconds N  --timeout-ms N
+ *   --mock (SDK mock instead of Jev)  --goal joint+=4,joint=-8.5,...  --max-steps N  --max-seconds N  --timeout-ms N
  * ROBO_URL selects the coordinator (default http://127.0.0.1:8940); ROBO_TOKEN in token mode.
  * No mode flag prints this help and never moves anything.
  */

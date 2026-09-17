@@ -25,26 +25,31 @@ const isJoint = (value: string): value is Joint =>
   joints.some((joint) => joint === value);
 
 /**
- * Parse `joint=+4,joint=12`: a signed value is relative to the start pose, an
- * unsigned one absolute. Every target must lie inside the commissioned limits.
+ * Parse `joint+=4`, `joint-=2` (relative to the start pose) and `joint=-8.5`
+ * (absolute; a sign after a plain "=" is part of the value). Every target must
+ * lie inside the commissioned limits.
  */
 export const parseGoal = (spec: string, obs: Observation): Goal => {
   const goal: Partial<Record<Joint, number>> = {};
   for (const part of spec.split(",")) {
     const match =
-      /^(?<joint>[a-z_]+)=(?<sign>[+-]?)(?<value>\d+(?:\.\d+)?)$/u.exec(
+      /^(?<joint>[a-z_]+)(?<op>\+=|-=|=)(?<value>-?\d+(?:\.\d+)?)$/u.exec(
         part.trim()
       );
     const joint = match?.groups?.["joint"] ?? "";
     if (!match?.groups || !isJoint(joint)) {
       throw new Error(
-        `Bad goal "${part}"; use joint=+4 (relative) or joint=12 (absolute)`
+        `Bad goal "${part}"; use joint+=4 / joint-=4 (relative) or joint=-8.5 (absolute)`
       );
     }
-    const sign = match.groups["sign"] ?? "";
+    const op = match.groups["op"];
     const value = Number(match.groups["value"]);
     const target = round(
-      sign ? obs.measured[joint] + Number(`${sign}${value}`) : value
+      op === "+="
+        ? obs.measured[joint] + value
+        : op === "-="
+          ? obs.measured[joint] - value
+          : value
     );
     const [low, high] = obs.limits[joint];
     if (target < low || target > high) {
@@ -82,8 +87,8 @@ export const resolveTask = (
   const stages = goal
     ? [parseGoal(goal, obs)]
     : [
-        parseGoal("gripper=+4", obs),
-        parseGoal("wrist_flex=+2", obs),
+        parseGoal("gripper+=4", obs),
+        parseGoal("wrist_flex+=2", obs),
         { wrist_flex: start.wrist_flex },
       ];
   return {

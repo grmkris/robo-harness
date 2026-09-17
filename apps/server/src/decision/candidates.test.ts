@@ -76,12 +76,14 @@ test("validation refuses drift, restarts, foreign control, limits and unoffered 
 
 test("goals are relative when signed, absolute otherwise, and inside limits", () => {
   const obs = fixtureObservation();
-  expect(parseGoal("gripper=+4,wrist_flex=-2", obs)).toEqual({
+  expect(parseGoal("gripper+=4,wrist_flex-=2", obs)).toEqual({
     gripper: 34,
     wrist_flex: 39,
   });
   expect(parseGoal("gripper=12", obs)).toEqual({ gripper: 12 });
-  expect(() => parseGoal("gripper=+80", obs)).toThrow();
+  expect(parseGoal("wrist_roll=-8.5", obs)).toEqual({ wrist_roll: -8.5 });
+  expect(() => parseGoal("gripper=+4", obs)).toThrow();
+  expect(() => parseGoal("gripper+=80", obs)).toThrow();
   expect(() => parseGoal("elbow=1", obs)).toThrow();
   expect(resolveTask("control-smoke", obs).stages).toEqual([
     { gripper: 34 },
