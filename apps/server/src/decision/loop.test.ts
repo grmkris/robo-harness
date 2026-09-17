@@ -15,7 +15,7 @@ import { rulesDecider } from "./strategies";
 import { resolveTask, stageTracker } from "./tasks";
 
 /** A fake motor owner: moves complete instantly unless told to lose replies or hold. */
-const rig = (mode: "normal" | "lost" | "fail" = "normal") => {
+const rig = (mode: "normal" | "lost" | "fail" | "partial" = "normal") => {
   const records = new Map<string, ActionRecord>();
   const ledger: ActionLedger = {
     get: (id) => records.get(id) ?? null,
@@ -68,7 +68,20 @@ const rig = (mode: "normal" | "lost" | "fail" = "normal") => {
     operation: async () => {
       if (!op) throw new Error("no op");
       if (op.status === "running") {
-        if (mode === "fail") {
+        if (mode === "partial") {
+          const shortfall = {
+            ...op.target,
+            gripper:
+              measured.gripper + (op.target.gripper - measured.gripper) * 0.6,
+          };
+          measured = shortfall;
+          op = {
+            ...op,
+            status: "failed",
+            reason: "Target did not settle before deadline",
+            residual: { ...measured, gripper: 0.72 },
+          };
+        } else if (mode === "fail") {
           op = {
             ...op,
             status: "failed",
@@ -203,4 +216,12 @@ test("a fatal decider failure ends the run with no motion", async () => {
   );
   expect(summary.end_reason).toBe("decider_billing");
   expect(r.calls.submit).toBe(0);
+});
+
+test("failed steps that still move most of the way count as progress, not a stall", async () => {
+  const r = rig("partial");
+  const summary = await runDecisionLoop(r.deps(), options({ maxSteps: 12 }));
+  expect(summary.end_reason).not.toBe("repeated_failures");
+  expect(summary.partial).toBeGreaterThanOrEqual(3);
+  expect(r.measured().gripper).toBeGreaterThan(32);
 });

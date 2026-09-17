@@ -53,6 +53,8 @@ export interface LoopSummary {
   readonly completed: number;
   readonly failed: number;
   readonly rejected: number;
+  /** Failed steps that still moved at least half the command. */
+  readonly partial: number;
   readonly decider_errors: number;
   readonly stages_reached: number;
   readonly task_complete: boolean;
@@ -101,6 +103,7 @@ export const runDecisionLoop = async (
     completed: 0,
     failed: 0,
     rejected: 0,
+    partial: 0,
     decider_errors: 0,
   };
   let failures = 0;
@@ -434,10 +437,22 @@ export const runDecisionLoop = async (
       before: now,
       after,
     }) ?? { expected: false, note: null };
+    // A failed step that still moved at least half its command in the right
+    // direction is progress under load, not a stall; it does not count toward
+    // stopping. The motor owner's own checks are unchanged.
+    const moved = change?.[action.joint] ?? 0;
+    const partial =
+      result.status === "failed" &&
+      Math.sign(moved) === Math.sign(action.delta) &&
+      Math.abs(moved) >= Math.abs(action.delta) / 2;
     if (result.status === "completed") {
       counts.completed += 1;
       failures = 0;
     } else if (hook.expected) {
+      failures = 0;
+    } else if (partial) {
+      counts.failed += 1;
+      counts.partial += 1;
       failures = 0;
     } else if (result.status !== "unknown") {
       counts.failed += 1;
@@ -448,6 +463,7 @@ export const runDecisionLoop = async (
       verdict: "valid",
       move,
       task_note: hook.note,
+      partial_progress: partial,
       request_id: result.request_id,
       operation_id: result.operation?.id ?? null,
       outcome: result.status,
