@@ -27,7 +27,10 @@ class MockDriver:
 
 
 DEFAULT_P_COEFFICIENT = 16  # LeRobot's SO-101 follower value (firmware default 32).
-P_COEFFICIENT_RANGE = (8, 64)
+# The ceiling follows the traces, not the firmware maximum (254): on 2026-09-18
+# shoulder_lift needed P=96 to raise the extended arm 1.8 deg (0.61 at 48, 1.85 at
+# 96) and showed zero rest jitter up to 128; above that nobody has measured.
+P_COEFFICIENT_RANGE = (8, 128)
 
 
 def configure_follower_with_hold(

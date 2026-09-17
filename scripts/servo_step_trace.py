@@ -16,7 +16,17 @@ import time
 from pathlib import Path
 
 MAX_STEP_DEG = 2.0
-REGISTERS = ("Present_Position", "Present_Voltage", "Present_Current", "Present_Load", "Moving", "Status")
+REGISTERS = (
+    "Present_Position",
+    "Present_Voltage",
+    "Present_Current",
+    "Present_Load",
+    "Present_Temperature",
+    "Moving",
+    "Status",
+)
+# A servo hotter than this ends the trace: STS3215 protection trips around 70 C.
+MAX_TEMPERATURE_C = 60
 
 
 def signed(value: int, bit: int) -> int:
@@ -36,6 +46,12 @@ def main() -> None:
     parser.add_argument("--step", type=float, required=True, help="degrees, |step| <= 2")
     parser.add_argument("--p-values", default="16", help="comma-separated P coefficients to compare")
     parser.add_argument("--hold-s", type=float, default=2.5)
+    parser.add_argument(
+        "--rest-s",
+        type=float,
+        default=2.0,
+        help="after each P, sample the holding joint at rest for this long: position spread shows buzzing",
+    )
     parser.add_argument("--report", required=True)
     args = parser.parse_args()
     if abs(args.step) > MAX_STEP_DEG:
@@ -84,6 +100,9 @@ def main() -> None:
                 row["Present_Current"] = signed(row["Present_Current"], 15)
                 rows.append(row)
             final = rows[-1]["Present_Position"]
+            hottest = max(r["Present_Temperature"] for r in rows)
+            if hottest > MAX_TEMPERATURE_C:
+                raise RuntimeError(f"{joint} reached {hottest} C; trace stopped to protect the servo")
             summary = {
                 "label": label,
                 "p": p,
@@ -97,6 +116,7 @@ def main() -> None:
                 "current_peak_mA": max(abs(r["Present_Current"]) for r in rows) * 6.5,
                 "load_peak_pct": max(abs(r["Present_Load"]) for r in rows) / 10,
                 "status_values": sorted({r["Status"] for r in rows}),
+                "temperature_max_C": hottest,
                 "samples": len(rows),
                 "rows": rows,
             }
@@ -112,6 +132,16 @@ def main() -> None:
                 continue
             report["trials"].append(sample(f"P{p} out", target, p))
             report["trials"].append(sample(f"P{p} back", start_deg, p))
+            # Buzzing shows as position spread while nothing is commanded.
+            t0 = time.monotonic()
+            rest = []
+            while time.monotonic() - t0 < args.rest_s:
+                rest.append(bus.read("Present_Position", joint))
+            spread = max(rest) - min(rest) if rest else 0.0
+            report["trials"].append(
+                {"label": f"P{p} rest", "p": p, "rest_spread_deg": round(spread, 3), "samples": len(rest)}
+            )
+            print(json.dumps(report["trials"][-1]), flush=True)
         report["result"] = "completed"
     except BaseException as error:
         report["error"] = f"{type(error).__name__}: {error}"
