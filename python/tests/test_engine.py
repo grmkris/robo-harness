@@ -501,3 +501,19 @@ def test_stream_mode_owns_motion_and_ends_with_the_lease(rig):
     assert e.setpoint is None
     with pytest.raises(ControlError, match="lease is absent"):
         e.set_stream_target(lease["lease_id"], "agent", {"shoulder_pan": 1})
+
+
+def test_stream_command_leads_the_measured_position_by_at_most_one_step(rig):
+    e, c = rig
+    lease = e.acquire("agent", mode="stream")
+    start = e.measured["shoulder_pan"]
+    # A joint that will not move: the command must lead it enough to break the
+    # servo's dead band, and no further.
+    e.driver.read = lambda: {**e.measured, "shoulder_pan": start}
+    for _ in range(90):
+        c.advance(1 / 30)
+        e.set_stream_target(lease["lease_id"], "agent", {"shoulder_pan": start + 40})
+        e.tick()
+    lead = e.commanded["shoulder_pan"] - start
+    assert lead == pytest.approx(e.profile["max_step"])
+    assert e.fault is None

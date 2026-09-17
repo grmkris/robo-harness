@@ -206,15 +206,27 @@ class Engine:
             }
 
     def _stream_proposal(self, dt: float) -> dict[str, float]:
-        """Rate-limited step toward the newest setpoint, or the current hold."""
+        """Rate-limited step toward the newest setpoint, or the current hold.
+
+        The command may lead the measured position by at most one `max_step`.
+        That lead is what moves a joint at all: these servos settle a few
+        tenths of a degree short of any small goal, so a stepped command that
+        is re-planned from the measured position each time never accumulates
+        enough error to overcome the joint's own friction. Letting the command
+        lead fixes that, and bounding the lead is what keeps a joint that
+        finally breaks free from lurching.
+        """
         setpoint = self.setpoint
         if not setpoint or self.clock() - setpoint["at"] > STREAM_STALE_S:
             return self.commanded
         step = self.profile["max_speed"] * dt
-        candidate = {
-            j: self.commanded[j] + max(-step, min(step, setpoint["target"][j] - self.commanded[j]))
-            for j in JOINTS
-        }
+        lead = self.profile["max_step"]
+        candidate = {}
+        for j in JOINTS:
+            rate_limited = self.commanded[j] + max(
+                -step, min(step, setpoint["target"][j] - self.commanded[j])
+            )
+            candidate[j] = max(self.measured[j] - lead, min(self.measured[j] + lead, rate_limited))
         try:
             self.kin.validate(candidate, self.profile)
         except ValueError as e:
