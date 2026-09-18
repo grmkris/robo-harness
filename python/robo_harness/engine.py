@@ -481,9 +481,7 @@ class Engine:
                     # and judging it would fail every move that does not touch
                     # it -- which is exactly what happened once unmentioned
                     # joints started holding their command (2026-09-18).
-                    settled = all(
-                        residual[j] <= (2 if j == "gripper" else 0.8) for j in op["_judged"]
-                    )
+                    settled = all(residual[j] <= (2 if j == "gripper" else 0.8) for j in op["_judged"])
                     if now >= op["_started"] + op["duration_s"] and settled:
                         op.update(status="completed", finished_ms=time.time() * 1000)
                     elif now - op["_started"] > op["duration_s"] + 2:
