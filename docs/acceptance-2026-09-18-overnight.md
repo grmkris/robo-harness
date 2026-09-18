@@ -62,3 +62,9 @@ Attempt #7 failed every move with `shoulder_lift` 1.2–1.4° short while the ar
 So P=128 does move it, by heating the servo 36 °C in one 2.5 s step. That is not a gain to ship. The tip is capped at **0.24 m** instead, the search runs its first arc there and steps _inward_, and a piece further out is reported as out of reach. (The spike was transient: the joint was back to 51 °C a minute later, torque on, status clean.)
 
 This also explains the 09-17 "the piece is within the envelope" note. It is, kinematically — the model solves top-down poses to 0.35 m. It is not within the _torque_ envelope, and nothing in the model or the solver knew that. **Trace a joint in the pose that loads it, and cap the workspace by what the trace says, not by what the solver will return.**
+
+## What a run may not die of
+
+Three of the night's runs ended on the motor owner's own protective stops — a camera frame past its 500 ms guard, and its 30 Hz loop overrunning on a throttled Pi. Both reflexes are right: an agent must not move blind or on stale state, and the lease is dropped with the motion. But they are transient, and treating them as fatal threw away a nine-minute search after 163 moves and a three-minute one after 57, in both cases while the arm was doing exactly what it should.
+
+Either message now waits for the robot to be fit again — no fault, fresh observation, fresh cameras — and retries the same step, six times per run, after which the run really does end. Every other cancellation stays fatal, and nothing about the motor owner's behaviour changed: the guard still stops the arm, the runner just no longer treats a pause as a verdict.
