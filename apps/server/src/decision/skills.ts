@@ -106,6 +106,8 @@ export const JOINT_HISTORY = 12;
 export interface SkillMemory {
   /** The tip direction that last brought the piece closer in the image. */
   centerDirection: Vec3 | null;
+  /** How many times a run has waited out a camera stall and carried on. */
+  cameraStalls: number;
   /** Recent per-joint commanded vs achieved motion, newest last. */
   jointHistory: JointMove[];
   contact: boolean;
@@ -115,6 +117,7 @@ export interface SkillMemory {
 
 export const newMemory = (): SkillMemory => ({
   centerDirection: null,
+  cameraStalls: 0,
   jointHistory: [],
   contact: false,
   lastSeen: null,
@@ -186,6 +189,36 @@ export class SkillAbort extends Error {
   }
 }
 
+/**
+ * The motor owner stops agent motion whenever a camera frame ages past its
+ * guard, and drops the lease with it. That is the right reflex -- an agent
+ * must not move blind -- but a sub-second hiccup is not a reason to throw away
+ * a run: on 2026-09-18 one ended a nine-minute search after 163 moves.
+ */
+const CAMERA_STALL = /camera observation is stale|camera is stale/i;
+/** Wait at most this long for the cameras to come back before giving up. */
+const CAMERA_RECOVERY_MS = 15_000;
+/** Runs end if the cameras stall this many times: something is actually wrong. */
+const MAX_CAMERA_STALLS = 6;
+
+/** Poll until every camera reports a fresh frame again, or time runs out. */
+const waitForCameras = async (ctx: SkillContext): Promise<Observation> => {
+  const until = performance.now() + CAMERA_RECOVERY_MS;
+  let obs = await ctx.observe();
+  while (performance.now() < until) {
+    if (ctx.signal.aborted)
+      throw new SkillAbort("cancelled while waiting for cameras");
+    const stale = Object.values(obs.cameras).some(
+      (camera) =>
+        camera.error !== null || camera.age_ms === null || camera.age_ms > 400
+    );
+    if (!stale) return obs;
+    await Bun.sleep(250);
+    obs = await ctx.observe();
+  }
+  throw new SkillAbort("cameras did not come back");
+};
+
 interface StepToward {
   readonly obs: Observation;
   readonly reached: boolean;
@@ -223,12 +256,25 @@ const stepToward = async (
     target,
     round(Math.max(1, (largest * scale) / 1.8))
   );
-  if (
-    outcome.status === "unknown" ||
-    outcome.status === "cancelled" ||
-    ctx.signal.aborted
-  ) {
+  if (outcome.status === "unknown" || ctx.signal.aborted) {
     throw new SkillAbort(`move ${outcome.status}: ${outcome.message}`);
+  }
+  if (outcome.status === "cancelled") {
+    // A camera stall is the motor owner doing its job, not a lost run: wait
+    // for the cameras and let the skill try the same step again.
+    if (!CAMERA_STALL.test(outcome.message)) {
+      throw new SkillAbort(`move ${outcome.status}: ${outcome.message}`);
+    }
+    ctx.memory.cameraStalls += 1;
+    if (ctx.memory.cameraStalls > MAX_CAMERA_STALLS) {
+      throw new SkillAbort(`cameras stalled ${ctx.memory.cameraStalls} times`);
+    }
+    return {
+      obs: await waitForCameras(ctx),
+      reached: false,
+      progressed: false,
+      outcome,
+    };
   }
   const after = outcome.after ?? (await ctx.observe());
   const moved = Math.max(

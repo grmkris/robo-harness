@@ -35,7 +35,12 @@ const config: SkillConfig = {
  * wrist camera 6 cm up the gripper looks along it, and the jaws stall on the
  * piece when they close around it.
  */
-const simulate = (piece: Vec3, startPose: Record<Joint, number>) => {
+const simulate = (
+  piece: Vec3,
+  startPose: Record<Joint, number>,
+  /** Moves at which the motor owner cancels because a camera went stale. */
+  cameraStallsAt: readonly number[] = []
+) => {
   let measured = { ...startPose };
   let moves = 0;
   const tips: Vec3[] = [];
@@ -87,6 +92,13 @@ const simulate = (piece: Vec3, startPose: Record<Joint, number>) => {
     target: Partial<Record<Joint, number>>
   ): Promise<MoveOutcome> => {
     moves += 1;
+    if (cameraStallsAt.includes(moves)) {
+      return {
+        status: "cancelled",
+        after: observe(),
+        message: "Motion cancelled: Camera observation is stale or unavailable",
+      };
+    }
     const next = { ...measured, ...target };
     const tip = position(tipFrame(next));
     const around =
@@ -133,9 +145,10 @@ const runWith = async (
   tactician: Tactician,
   piece: Vec3,
   maxSeconds = 120,
-  placeBack = false
+  placeBack = false,
+  cameraStallsAt: readonly number[] = []
 ) => {
-  const sim = simulate(piece, hover);
+  const sim = simulate(piece, hover, cameraStallsAt);
   const events: { event: string; data: Record<string, unknown> }[] = [];
   const summary = await runSkillLoop(
     {
@@ -278,4 +291,17 @@ test("with place-back a completed pickup puts the piece down and rises again", a
   expect(sim.measured().gripper).toBeGreaterThanOrEqual(config.openPercent - 2);
   const tip = sim.tips().at(-1)!;
   expect(tip[2] - config.matZ).toBeGreaterThan(config.liftM - 0.01);
+});
+
+test("a camera stall mid-skill is waited out, not the end of the run", async () => {
+  const { summary, events } = await runWith(
+    rulesTactician(),
+    matPiece(0.2, 0.09),
+    120,
+    false,
+    [3, 9, 20]
+  );
+  expect(summary.end_reason).toBe("done");
+  expect(summary.task_complete).toBe(true);
+  expect(events.filter((e) => e.event === "skill_aborted")).toHaveLength(0);
 });
