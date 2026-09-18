@@ -64,6 +64,8 @@ export interface SkillConfig {
    * model solves top-down poses out to 0.35 m -- but a torque one: traced on
    * 2026-09-18, holding the arm at 0.27 m left shoulder_lift 1.3 deg below
    * its command at P=96, and P=128 pulled 1.5 A and spiked the servo to 88 C.
+   * 0.22 is where the arm's own moves were completing that night; at 0.25 the
+   * lift was still 1.2 deg short and every multi-joint move failed.
    */
   readonly maxReachM: number;
   readonly liftM: number;
@@ -88,9 +90,9 @@ export const skillDefaults = {
   graspHeightM: 0.012,
   scanHeightM: 0.1,
   sweepClearanceM: 0.03,
-  scanRadiusM: 0.22,
+  scanRadiusM: 0.2,
   scanCenterPanDeg: 0,
-  maxReachM: 0.24,
+  maxReachM: 0.22,
   liftM: 0.05,
   openPercent: 60,
   heldPercent: 4,
