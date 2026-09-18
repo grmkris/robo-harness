@@ -81,3 +81,22 @@ P=96 was traced in the hover pose (r ≈ 0.15 m). At working reach with the fore
 So `shoulder_lift` is **128**. The 1.5 A / 88 °C spike that stopped the earlier trace was at full extension (r ≈ 0.27 m), which the 0.22 m reach cap now refuses — the same gain is safe inside the envelope and dangerous outside it, which is the argument for capping the envelope rather than the gain.
 
 First transit after the change: **8 of 8 multi-joint moves completed**, lift residuals 0.63–0.72°, where every one of them had failed before.
+
+## Where the night ended: the workspace, not the software
+
+The last run is the one to read. **233 moves, zero failures**, a clean `captured` recording (2710 samples at 5.6 Hz, 32 MB MP4), the arm sweeping three arcs at 9.6 cm above the mat between r = 0.20 m and r = 0.10 m, lift residuals 0.63–0.72°, and no protective stop, no abort, no stall. Every mechanism built over the last two nights did its job. It found nothing.
+
+Two frames from that recording say why. With the tip at r = 0.147 m the wrist camera is looking at **the mat's edge and the white table** — because the gripper is still over the table. The overhead frame from the same instant shows the piece far out on the mat, roughly twice the gripper's distance from the base.
+
+So the mat, and the piece on it, begin outside the arm's reach. Not outside the solver's reach — it will happily return top-down poses to 0.35 m — but outside the radius where the joints hold their command, which tonight's traces put at 0.22 m. The forced homography's estimate of r = 0.166 m is the fit being wrong (21 % inliers, and it fails its own coverage bar on an arc-shaped sweep); the two photographs are the evidence.
+
+**The first move of the next session is physical: slide the mat toward the arm so the piece sits 15–20 cm from the base.** Then:
+
+```bash
+bun run jev --observe --task pickup-skills          # does the wrist see it?
+bun run jev --execute --supervised --task pickup-skills \
+  --strategy rules --max-steps 400 --max-seconds 480 --place-back \
+  --record "Pickup rules"                            # then --strategy jev
+```
+
+Two things remain worth doing on the software side, in this order: the coverage bar in `overhead_calibration.py` should measure principal-axis spread rather than x and y spans, because an arc sweep fails it by construction; and the search deserves a wrist-camera footprint check — at 9.6 cm the camera sees about 20 cm of mat, which is what makes a three-arc raster sufficient, and nothing in the code asserts it.
