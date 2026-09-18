@@ -136,6 +136,11 @@ export async function startHarness(
     cwd: root,
     env: {
       ...process.env,
+      // Tests must not inherit live credentials: this repo's dev host exports
+      // a real AI_GATEWAY_API_KEY, which turned the "no key is blocked"
+      // assertion into a billed Gateway call that passed. A test that wants a
+      // key sets one through options.env.
+      AI_GATEWAY_API_KEY: "",
       ROBO_PORT: "0",
       ROBO_HOST: "127.0.0.1",
       ROBO_ACCESS_MODE: accessMode,
