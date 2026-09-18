@@ -572,3 +572,17 @@ def test_joints_the_target_does_not_mention_hold_their_command_not_their_sag(rig
     assert op["start"]["shoulder_pan"] == e.measured["shoulder_pan"]
     advance(e, c, 0.1)
     assert e.commanded["shoulder_lift"] == op["target"]["shoulder_lift"]
+
+
+def test_a_move_is_judged_on_the_joints_it_asked_to_move(rig):
+    e, c = rig
+    lease = e.acquire("agent")
+    # A joint nobody is moving sags below its command, as a loaded joint does.
+    op = e.submit("pan", lease["lease_id"], "agent", target={"shoulder_pan": e.measured["shoulder_pan"] + 1})
+    plain = e.driver.read
+    e.driver.read = lambda: {**plain(), "shoulder_lift": plain()["shoulder_lift"] - 1.4}
+    advance(e, c, 1.4)
+    done = e.get_operation(op["id"])
+    assert done["status"] == "completed"
+    # The sag is still reported, it just does not decide the verdict.
+    assert done["residual"]["shoulder_lift"] > 0.8

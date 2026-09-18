@@ -383,6 +383,7 @@ class Engine:
                 "started_ms": time.time() * 1000,
                 "_started": self.clock(),
                 "_signature": signature,
+                "_judged": sorted(target),
                 "residual": None,
                 "measured": copy.deepcopy(self.measured),
             }
@@ -475,9 +476,15 @@ class Engine:
                     residual = {j: abs(self.measured[j] - op["target"][j]) for j in JOINTS}
                     op["residual"] = residual
                     op["measured"] = copy.deepcopy(self.measured)
-                    if now >= op["_started"] + op["duration_s"] and all(
-                        v <= (2 if j == "gripper" else 0.8) for j, v in residual.items()
-                    ):
+                    # Judge only the joints this move asked to move. A held
+                    # joint sits a degree or so below its command under load,
+                    # and judging it would fail every move that does not touch
+                    # it -- which is exactly what happened once unmentioned
+                    # joints started holding their command (2026-09-18).
+                    settled = all(
+                        residual[j] <= (2 if j == "gripper" else 0.8) for j in op["_judged"]
+                    )
+                    if now >= op["_started"] + op["duration_s"] and settled:
                         op.update(status="completed", finished_ms=time.time() * 1000)
                     elif now - op["_started"] > op["duration_s"] + 2:
                         op.update(
