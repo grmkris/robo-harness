@@ -68,3 +68,16 @@ This also explains the 09-17 "the piece is within the envelope" note. It is, kin
 Three of the night's runs ended on the motor owner's own protective stops — a camera frame past its 500 ms guard, and its 30 Hz loop overrunning on a throttled Pi. Both reflexes are right: an agent must not move blind or on stale state, and the lease is dropped with the motion. But they are transient, and treating them as fatal threw away a nine-minute search after 163 moves and a three-minute one after 57, in both cases while the arm was doing exactly what it should.
 
 Either message now waits for the robot to be fit again — no fault, fresh observation, fresh cameras — and retries the same step, six times per run, after which the run really does end. Every other cancellation stays fatal, and nothing about the motor owner's behaviour changed: the guard still stops the arm, the runner just no longer treats a pause as a verdict.
+
+## The gain, settled at two radii
+
+P=96 was traced in the hover pose (r ≈ 0.15 m). At working reach with the forearm extended it still left the lift 0.8–1.2° under command on live multi-joint moves — over the motor owner's 0.8° verdict, though the tip was within millimetres, because the sag is systematic. Traced again in that pose:
+
+| P   | Raising 1.8° | Residual | Peak current | Servo temperature |
+| --- | ------------ | -------- | ------------ | ----------------- |
+| 96  | −1.23°       | 0.57°    | 559 mA       | 51 °C             |
+| 128 | −1.93°       | 0.39°    | 949 mA       | 51 °C, flat       |
+
+So `shoulder_lift` is **128**. The 1.5 A / 88 °C spike that stopped the earlier trace was at full extension (r ≈ 0.27 m), which the 0.22 m reach cap now refuses — the same gain is safe inside the envelope and dangerous outside it, which is the argument for capping the envelope rather than the gain.
+
+First transit after the change: **8 of 8 multi-joint moves completed**, lift residuals 0.63–0.72°, where every one of them had failed before.
