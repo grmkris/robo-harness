@@ -305,3 +305,11 @@ test("a camera stall mid-skill is waited out, not the end of the run", async () 
   expect(summary.task_complete).toBe(true);
   expect(events.filter((e) => e.event === "skill_aborted")).toHaveLength(0);
 });
+
+test("the tip is never driven past the reach the joints can hold", async () => {
+  // The model solves top-down poses out to 0.35 m; the joints do not hold
+  // there. A piece beyond the cap is a workspace problem, not a move to try.
+  const { sim } = await runWith(rulesTactician(), matPiece(0.32, 0.05));
+  const furthest = Math.max(...sim.tips().map((t) => Math.hypot(t[0], t[1])));
+  expect(furthest).toBeLessThanOrEqual(config.maxReachM + 0.01);
+});

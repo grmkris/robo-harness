@@ -59,6 +59,13 @@ export interface SkillConfig {
   readonly scanRadiusM: number;
   /** Pan heading the search arcs are centred on: where the mat is. */
   readonly scanCenterPanDeg: number;
+  /**
+   * Furthest the tip is driven from the base. Not a kinematic limit -- the
+   * model solves top-down poses out to 0.35 m -- but a torque one: traced on
+   * 2026-09-18, holding the arm at 0.27 m left shoulder_lift 1.3 deg below
+   * its command at P=96, and P=128 pulled 1.5 A and spiked the servo to 88 C.
+   */
+  readonly maxReachM: number;
   readonly liftM: number;
   readonly openPercent: number;
   readonly heldPercent: number;
@@ -81,13 +88,14 @@ export const skillDefaults = {
   graspHeightM: 0.012,
   scanHeightM: 0.1,
   sweepClearanceM: 0.03,
-  scanRadiusM: 0.2,
+  scanRadiusM: 0.22,
   scanCenterPanDeg: 0,
+  maxReachM: 0.24,
   liftM: 0.05,
   openPercent: 60,
   heldPercent: 4,
   scanPanSpanDeg: 45,
-  scanReachStepM: 0.07,
+  scanReachStepM: -0.05,
   scanArcs: 3,
   moveCapDeg: 1.6,
 } as const;
@@ -361,6 +369,16 @@ const moveTip = async (
       vetoed: "target below mat clearance",
     };
   }
+  const reachM = Math.hypot(target[0], target[1]);
+  if (reachM > ctx.config.maxReachM) {
+    return {
+      obs,
+      reached: false,
+      moves: 0,
+      errorM: distance(from, target),
+      vetoed: `target ${round(reachM)} m from the base, past the ${ctx.config.maxReachM} m the joints hold`,
+    };
+  }
   // The whole target must be reachable before any segment is walked.
   const check = reach(obs.measured, target, ctx.config.limits);
   if (check.errorM > 0.006 || check.downness < 0.95) {
@@ -451,7 +469,10 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
   const [x0, y0] = tipOf(obs);
   // Along the mat's heading: the arm may have been left pointing anywhere.
   const heading = (-ctx.config.scanCenterPanDeg * Math.PI) / 180;
-  const startRadius = Math.max(Math.hypot(x0, y0), ctx.config.scanRadiusM);
+  const startRadius = Math.min(
+    ctx.config.maxReachM,
+    Math.max(Math.hypot(x0, y0), ctx.config.scanRadiusM)
+  );
   const startTip: Vec3 = [
     Math.cos(heading) * startRadius,
     Math.sin(heading) * startRadius,
@@ -498,8 +519,10 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
   let sign = obs.measured.shoulder_pan <= startPan ? 1 : -1;
   for (let arc = 0; arc < ctx.config.scanArcs; arc += 1) {
     if (arc > 0) {
-      // Step outward along the current heading, so successive arcs cover
-      // rings of mat at increasing distance from the base.
+      // Step along the current heading, so successive arcs cover rings of mat
+      // at different distances from the base. The step is inward: the first
+      // arc runs at the furthest radius the joints hold, and going further out
+      // is what the reach cap refuses.
       const [x, y] = position(tipFrame(obs.measured));
       const radius = Math.hypot(x, y);
       const step = ctx.config.scanReachStepM;
