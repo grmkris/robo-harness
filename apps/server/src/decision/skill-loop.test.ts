@@ -93,11 +93,19 @@ const simulate = (
   ): Promise<MoveOutcome> => {
     moves += 1;
     if (cameraStallsAt.includes(moves)) {
-      return {
-        status: "cancelled",
-        after: observe(),
-        message: "Motion cancelled: Camera observation is stale or unavailable",
-      };
+      // Alternate the two protective stops the motor owner actually issues.
+      return moves % 2 === 0
+        ? {
+            status: "cancelled" as const,
+            after: observe(),
+            message:
+              "Motion cancelled: Camera observation is stale or unavailable",
+          }
+        : {
+            status: "failed" as const,
+            after: observe(),
+            message: "Motion cancelled: Control loop deadline missed",
+          };
     }
     const next = { ...measured, ...target };
     const tip = position(tipFrame(next));
@@ -293,7 +301,7 @@ test("with place-back a completed pickup puts the piece down and rises again", a
   expect(tip[2] - config.matZ).toBeGreaterThan(config.liftM - 0.01);
 });
 
-test("a camera stall mid-skill is waited out, not the end of the run", async () => {
+test("a protective stop mid-skill is waited out, not the end of the run", async () => {
   const { summary, events } = await runWith(
     rulesTactician(),
     matPiece(0.2, 0.09),

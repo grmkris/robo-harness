@@ -116,8 +116,8 @@ export const JOINT_HISTORY = 12;
 export interface SkillMemory {
   /** The tip direction that last brought the piece closer in the image. */
   centerDirection: Vec3 | null;
-  /** How many times a run has waited out a camera stall and carried on. */
-  cameraStalls: number;
+  /** How many times a run has waited out a motor-owner stop and carried on. */
+  protectiveStops: number;
   /** Recent per-joint commanded vs achieved motion, newest last. */
   jointHistory: JointMove[];
   contact: boolean;
@@ -127,7 +127,7 @@ export interface SkillMemory {
 
 export const newMemory = (): SkillMemory => ({
   centerDirection: null,
-  cameraStalls: 0,
+  protectiveStops: 0,
   jointHistory: [],
   contact: false,
   lastSeen: null,
@@ -200,33 +200,39 @@ export class SkillAbort extends Error {
 }
 
 /**
- * The motor owner stops agent motion whenever a camera frame ages past its
- * guard, and drops the lease with it. That is the right reflex -- an agent
- * must not move blind -- but a sub-second hiccup is not a reason to throw away
- * a run: on 2026-09-18 one ended a nine-minute search after 163 moves.
+ * The motor owner stops agent motion, and drops the lease, whenever it cannot
+ * vouch for what it is doing: a camera frame older than its guard, or its own
+ * 30 Hz loop overrunning on a thermally throttled Pi. Both are the right
+ * reflex, and both are transient. Treating them as fatal cost a nine-minute
+ * search after 163 moves and a three-minute one after 57 (2026-09-18).
  */
-const CAMERA_STALL = /camera observation is stale|camera is stale/i;
-/** Wait at most this long for the cameras to come back before giving up. */
-const CAMERA_RECOVERY_MS = 15_000;
-/** Runs end if the cameras stall this many times: something is actually wrong. */
-const MAX_CAMERA_STALLS = 6;
+const PROTECTIVE_STOP =
+  /camera observation is stale|camera is stale|control loop deadline missed/i;
+/** Wait at most this long for the robot to come back before giving up. */
+const RECOVERY_MS = 15_000;
+/** Runs end after this many protective stops: something is actually wrong. */
+const MAX_PROTECTIVE_STOPS = 6;
 
-/** Poll until every camera reports a fresh frame again, or time runs out. */
-const waitForCameras = async (ctx: SkillContext): Promise<Observation> => {
-  const until = performance.now() + CAMERA_RECOVERY_MS;
+/** Poll until the robot is fit to be commanded again, or time runs out. */
+const waitForHealth = async (ctx: SkillContext): Promise<Observation> => {
+  const until = performance.now() + RECOVERY_MS;
   let obs = await ctx.observe();
   while (performance.now() < until) {
-    if (ctx.signal.aborted)
-      throw new SkillAbort("cancelled while waiting for cameras");
-    const stale = Object.values(obs.cameras).some(
-      (camera) =>
-        camera.error !== null || camera.age_ms === null || camera.age_ms > 400
-    );
-    if (!stale) return obs;
-    await Bun.sleep(250);
+    if (ctx.signal.aborted) {
+      throw new SkillAbort("cancelled while waiting for the robot");
+    }
+    const unfit =
+      obs.fault !== null ||
+      obs.age_ms > 400 ||
+      Object.values(obs.cameras).some(
+        (camera) =>
+          camera.error !== null || camera.age_ms === null || camera.age_ms > 400
+      );
+    if (!unfit) return obs;
+    await Bun.sleep(150);
     obs = await ctx.observe();
   }
-  throw new SkillAbort("cameras did not come back");
+  throw new SkillAbort("the robot did not come back");
 };
 
 interface StepToward {
@@ -269,22 +275,24 @@ const stepToward = async (
   if (outcome.status === "unknown" || ctx.signal.aborted) {
     throw new SkillAbort(`move ${outcome.status}: ${outcome.message}`);
   }
-  if (outcome.status === "cancelled") {
-    // A camera stall is the motor owner doing its job, not a lost run: wait
-    // for the cameras and let the skill try the same step again.
-    if (!CAMERA_STALL.test(outcome.message)) {
-      throw new SkillAbort(`move ${outcome.status}: ${outcome.message}`);
-    }
-    ctx.memory.cameraStalls += 1;
-    if (ctx.memory.cameraStalls > MAX_CAMERA_STALLS) {
-      throw new SkillAbort(`cameras stalled ${ctx.memory.cameraStalls} times`);
+  if (PROTECTIVE_STOP.test(outcome.message)) {
+    // The motor owner doing its job, not a lost run: wait for the robot and
+    // let the skill try the same step again.
+    ctx.memory.protectiveStops += 1;
+    if (ctx.memory.protectiveStops > MAX_PROTECTIVE_STOPS) {
+      throw new SkillAbort(
+        `the motor owner stopped ${ctx.memory.protectiveStops} times: ${outcome.message}`
+      );
     }
     return {
-      obs: await waitForCameras(ctx),
+      obs: await waitForHealth(ctx),
       reached: false,
       progressed: false,
       outcome,
     };
+  }
+  if (outcome.status === "cancelled") {
+    throw new SkillAbort(`move ${outcome.status}: ${outcome.message}`);
   }
   const after = outcome.after ?? (await ctx.observe());
   const moved = Math.max(
