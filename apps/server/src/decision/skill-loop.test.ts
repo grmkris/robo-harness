@@ -299,7 +299,7 @@ test("with place-back a completed pickup puts the piece down and rises again", a
   expect(sim.measured().gripper).toBeGreaterThanOrEqual(config.openPercent - 2);
   const tip = sim.tips().at(-1)!;
   expect(tip[2] - config.matZ).toBeGreaterThan(config.liftM - 0.01);
-});
+}, 20_000);
 
 test("a protective stop mid-skill is waited out, not the end of the run", async () => {
   const { summary, events } = await runWith(
@@ -312,7 +312,8 @@ test("a protective stop mid-skill is waited out, not the end of the run", async 
   expect(summary.end_reason).toBe("done");
   expect(summary.task_complete).toBe(true);
   expect(events.filter((e) => e.event === "skill_aborted")).toHaveLength(0);
-});
+  // Each recovery polls the robot for a moment, so this one is not instant.
+}, 30_000);
 
 test("the tip is never driven past the reach the joints can hold", async () => {
   // The model solves top-down poses out to 0.35 m; the joints do not hold

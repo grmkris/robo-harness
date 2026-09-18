@@ -592,10 +592,20 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
     }
     sign = -sign;
   }
+  // Name the annulus that was searched: "not found" is only actionable if it
+  // says where the arm looked, and the piece may simply be outside the reach
+  // the joints hold.
+  const inner = round(
+    Math.max(
+      0,
+      ctx.config.maxReachM +
+        ctx.config.scanReachStepM * (ctx.config.scanArcs - 1)
+    )
+  );
   return result(
     "scan_for_piece",
     "lost",
-    `swept ${ctx.config.scanArcs} arcs without seeing the piece`,
+    `swept ${ctx.config.scanArcs} arcs from ${inner} to ${round(ctx.config.maxReachM)} m at +-${ctx.config.scanPanSpanDeg} deg without seeing the piece`,
     ctx.memory.movesUsed - startMoves
   );
 };
