@@ -32,3 +32,20 @@ Servos at most 41 °C. Profile: **pan 64, lift 96, elbow 96, wrist_flex 64, roll
 5. The search arcs were centred on whatever heading the arm was left at; they centre on the mat now and regain height before each arc.
 
 Also landed: `joint_health` in the scene (per joint follows / lag / stalled direction; the rules stop instead of retrying a skill that stalled on a joint that no longer follows), a wall-clock deadline inside skills, a `place` skill with `--place-back`, leader-mode mock tests, and `scripts/overhead_calibration.py` (refuses tonight's sweeps honestly: black arm on black mat gives too few clean tip detections; the piece detector finds the piece at (176, 329) once restricted to the mat).
+
+## The run-by-run ledger
+
+Each attempt died of something different, and each cause was real. In order:
+
+| # | Ended with | Cause, once read against FK and the recording |
+| --- | --- | --- |
+| 1 | swept 3 arcs, piece unseen | `moveTip` walked one solve in joint space: the "7 cm outward" step lost 6 cm of height and the sweep ran at the mat edge |
+| 2 | 312 moves, all refused | the wrist camera had re-enumerated; the motor owner's freshness guard refused every acquire (correct) |
+| 3 | centred on nothing | a wedge of white table at the mat edge passed the background rule and the arm went to centre on it |
+| 4 | swept, piece unseen | arcs centred on the heading the arm was left at, and the arm sank 4 cm over thirty "completed" moves |
+| 5 | `Camera observation is stale` at 509 s | a sub-second camera hiccup crossed the 500 ms guard and the runner treated the cancelled move as fatal |
+| 6 | `Target did not settle` after 18 moves | holding the command for unmentioned joints was right, but the completion check still judged them, and a loaded joint sits ~1.3° below its command |
+
+Nothing in that list is the tactician, the model, or the plan. Every one is a plumbing fact that only shows up when the recording is read against forward kinematics — a completed move that moved the arm somewhere else, a camera that is alive but stale, a verdict about a joint nobody asked to move.
+
+The gate found one more: the repo's own test asserting "a live smoke without a key is blocked" inherited this host's real `AI_GATEWAY_API_KEY` through the spawned app, so it made a **billed** Gateway call and then failed on the answer being "passed". The harness now gives the app no ambient credential.
