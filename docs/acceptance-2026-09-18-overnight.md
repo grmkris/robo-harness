@@ -49,3 +49,16 @@ Each attempt died of something different, and each cause was real. In order:
 Nothing in that list is the tactician, the model, or the plan. Every one is a plumbing fact that only shows up when the recording is read against forward kinematics — a completed move that moved the arm somewhere else, a camera that is alive but stale, a verdict about a joint nobody asked to move.
 
 The gate found one more: the repo's own test asserting "a live smoke without a key is blocked" inherited this host's real `AI_GATEWAY_API_KEY` through the spawned app, so it made a **billed** Gateway call and then failed on the answer being "passed". The harness now gives the app no ambient credential.
+
+## The reach cap, and why it is a torque number
+
+Attempt #7 failed every move with `shoulder_lift` 1.2–1.4° short while the arm was fully extended at r ≈ 0.27 m. The P sweep that set P=96 was traced in the _hover_ pose (r ≈ 0.15 m) — a far shorter lever. Re-traced in the extended pose:
+
+| P | Raising 1.8° | Residual | Peak current | Servo temperature |
+| --- | --- | --- | --- | --- |
+| 96 | −0.53° | 1.27° | 604 mA | 52 °C |
+| 128 | −2.20° | 0.48° | **1502 mA** | **88 °C** — trace stopped by its own guard |
+
+So P=128 does move it, by heating the servo 36 °C in one 2.5 s step. That is not a gain to ship. The tip is capped at **0.24 m** instead, the search runs its first arc there and steps _inward_, and a piece further out is reported as out of reach. (The spike was transient: the joint was back to 51 °C a minute later, torque on, status clean.)
+
+This also explains the 09-17 "the piece is within the envelope" note. It is, kinematically — the model solves top-down poses to 0.35 m. It is not within the _torque_ envelope, and nothing in the model or the solver knew that. **Trace a joint in the pose that loads it, and cap the workspace by what the trace says, not by what the solver will return.**
