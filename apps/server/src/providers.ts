@@ -9,6 +9,10 @@ import { ApiError } from "./robot";
 
 const alibaba =
   "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
+// xAI goes to api.x.ai unless ROBO_XAI_URL points it elsewhere (the cliproxy
+// gateway on netcup serves grok-* with the same OpenAI-compatible shape).
+const xaiDefault = "https://api.x.ai/v1";
+const xaiUrl = () => process.env["ROBO_XAI_URL"] ?? xaiDefault;
 // The token-plan key is stored as ALIBABA_TOKEN_PLAN_API_KEY on this machine;
 // accept it as well as the OpenAI-compatible DASHSCOPE_API_KEY name.
 const alibabaKey = () =>
@@ -94,11 +98,7 @@ export async function catalog(): Promise<ProviderInfo[]> {
     process.env["ROBO_ALIBABA_URL"] ?? alibaba,
     alibabaModels
   );
-  const xaiCapabilities = capabilityList(
-    "xai",
-    "https://api.x.ai/v1",
-    xaiModels
-  );
+  const xaiCapabilities = capabilityList("xai", xaiUrl(), xaiModels);
   return [
     {
       id: "alibaba",
@@ -164,7 +164,7 @@ export async function resolveModel(provider: string, model?: string) {
     baseURL:
       provider === "alibaba"
         ? (process.env["ROBO_ALIBABA_URL"] ?? alibaba)
-        : "https://api.x.ai/v1",
+        : xaiUrl(),
     maxRetries: 0,
     apiKey: provider === "alibaba" ? (key ?? "") : "per-request-token",
     ...(provider === "xai"

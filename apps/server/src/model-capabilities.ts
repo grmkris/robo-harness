@@ -26,10 +26,16 @@ export const modelCapabilities = (
   } = {}
 ): ModelCapabilities => {
   const host = new URL(endpoint).hostname;
+  // The cliproxy gateway (loopback on netcup, *.ts.net on the tailnet) fronts the
+  // same upstream models, so documented image support carries over to it.
+  const gateway =
+    host === "127.0.0.1" || host === "localhost" || host.endsWith(".ts.net");
   const alibaba =
     provider === "alibaba" &&
-    (host.endsWith(".aliyuncs.com") || host.endsWith(".alibabacloud.com"));
-  const xai = provider === "xai" && host === "api.x.ai";
+    (gateway ||
+      host.endsWith(".aliyuncs.com") ||
+      host.endsWith(".alibabacloud.com"));
+  const xai = provider === "xai" && (gateway || host === "api.x.ai");
   const documented =
     (alibaba && (alibabaVision.has(model) || alibabaText.has(model))) ||
     (xai && model === "grok-4.6");
