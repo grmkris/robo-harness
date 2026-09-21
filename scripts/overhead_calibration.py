@@ -11,7 +11,9 @@ The tip is found by differencing each frame against a median background, which
 only works where the arm moved enough for the median to be arm-free and the
 tip sits over something it contrasts with. The fit refuses to write unless the
 coverage and residuals clear the bars below; a calibration that failed those
-is worse than none, because the search would trust it.
+is worse than none, because the search would trust it. Coverage is measured
+along the points' own principal axes, so an arc sweep is judged on how much
+mat it actually crossed rather than on how it happens to lie against x and y.
 
 Also finds the piece in the background: the bright blob with a dark surround.
 """
@@ -30,6 +32,11 @@ DIFF_THRESHOLD = 40
 MIN_ARM_PIXELS = 150
 INLIER_M = 0.012
 MIN_SPAN_M = 0.15
+# Points on one line fix no plane however far apart they are, so the fit also needs
+# spread across the sweep. An arc's own width is its sagitta, which is small but real.
+MIN_MINOR_SPAN_M = 0.03
+# Two points define a direction but no spread, so a shorter set has no extent to measure.
+MIN_SPREAD_POINTS = 2
 MIN_INLIER_FRACTION = 0.6
 MAX_P90_M = 0.010
 RANSAC_ROUNDS = 3000
@@ -68,6 +75,27 @@ def dlt(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
         rows.append([0, 0, 0, -x, -y, -1, v * x, v * y, v])
     _, _, vt = np.linalg.svd(np.array(rows))
     return np.linalg.inv(td) @ vt[-1].reshape(3, 3) @ ts
+
+
+def coverage_spread(points: np.ndarray) -> tuple[float, float]:
+    """Extent of a point set along its own principal axes, in metres (major, minor).
+
+    Axis-aligned extents measure the camera's orientation as much as the sweep's
+    coverage: the same arc reads wide or narrow depending only on how it happens to
+    lie against x and y, so a serpentine raster of arcs fails an x/y bar by
+    construction. Projecting onto the set's own principal axes removes that
+    dependence. The minor extent is the one that decides whether a homography is
+    determined at all -- collinear points fix no plane however far apart they are.
+    """
+    if len(points) < MIN_SPREAD_POINTS:
+        return 0.0, 0.0
+    finite = points[np.isfinite(points).all(axis=1)]
+    if len(finite) < MIN_SPREAD_POINTS:
+        return 0.0, 0.0
+    centred = finite - finite.mean(axis=0)
+    _, _, basis = np.linalg.svd(centred, full_matrices=False)
+    projected = centred @ basis.T
+    return float(np.ptp(projected[:, 0])), float(np.ptp(projected[:, 1]))
 
 
 def apply(h: np.ndarray, points: np.ndarray) -> np.ndarray:
@@ -202,20 +230,21 @@ def main() -> None:
     h = dlt(pixels_a[best_inliers], metres_a[best_inliers])
     err = np.nan_to_num(np.linalg.norm(apply(h, pixels_a) - metres_a, axis=1), nan=1e9)
     inliers = err < INLIER_M
+    spread_major, spread_minor = coverage_spread(metres_a[inliers]) if inliers.any() else (0.0, 0.0)
     fit = {
         "detections": len(pixels_a),
         "inliers": int(inliers.sum()),
         "inlier_fraction": round(float(inliers.mean()), 3),
         "residual_p50_mm": round(float(np.median(err[inliers]) * 1000), 1) if inliers.any() else None,
         "residual_p90_mm": round(float(np.percentile(err[inliers], 90) * 1000), 1) if inliers.any() else None,
-        "span_x_m": round(float(np.ptp(metres_a[inliers, 0])), 3) if inliers.any() else 0.0,
-        "span_y_m": round(float(np.ptp(metres_a[inliers, 1])), 3) if inliers.any() else 0.0,
+        "spread_major_m": round(spread_major, 3),
+        "spread_minor_m": round(spread_minor, 3),
     }
     bars = {
         "inlier_fraction": fit["inlier_fraction"] >= MIN_INLIER_FRACTION,
         "residual_p90": fit["residual_p90_mm"] is not None and fit["residual_p90_mm"] <= MAX_P90_M * 1000,
-        "span_x": fit["span_x_m"] >= MIN_SPAN_M,
-        "span_y": fit["span_y_m"] >= MIN_SPAN_M,
+        "spread_major": fit["spread_major_m"] >= MIN_SPAN_M,
+        "spread_minor": fit["spread_minor_m"] >= MIN_MINOR_SPAN_M,
     }
     piece = find_piece(background)
     piece_xy = apply(h, np.array([[piece["x"], piece["y"]]]))[0].tolist() if piece else None
