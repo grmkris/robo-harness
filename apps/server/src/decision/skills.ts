@@ -77,6 +77,19 @@ export interface SkillConfig {
   readonly scanReachStepM: number;
   /** How many arcs the search sweeps before giving up. */
   readonly scanArcs: number;
+  /**
+   * Width of mat the wrist camera sees, as a multiple of the tip's height
+   * above it. The three-arc raster is only sufficient because this is large:
+   * at the 0.1 m scan height it puts about 0.2 m of mat in frame, so arcs
+   * 0.05 m apart overlap heavily rather than leaving unseen rings.
+   *
+   * UNVERIFIED. It is the working assumption the search was designed around,
+   * not a measurement: the wrist Innomaker's field of view is not recorded
+   * anywhere in the lab, and it looks along the jaws rather than straight
+   * down, so the real footprint is a skewed quad rather than a square. Point
+   * the wrist at a ruler on the mat at a known height and replace this.
+   */
+  readonly wristFootprintRatio: number;
   readonly limits: Readonly<Record<string, readonly [number, number]>>;
   /** Per-move joint cap, below the motor owner's max_step. */
   readonly moveCapDeg: number;
@@ -99,6 +112,7 @@ export const skillDefaults = {
   scanPanSpanDeg: 45,
   scanReachStepM: -0.05,
   scanArcs: 3,
+  wristFootprintRatio: 2.08,
   moveCapDeg: 1.6,
 } as const;
 
@@ -163,6 +177,47 @@ const round = (value: number) => Math.round(value * 1000) / 1000;
 
 export const heightAboveMat = (obs: Observation, config: SkillConfig) =>
   (obs.ee[2] ?? 0) - config.matZ;
+
+/** Mat width the wrist camera sees with the tip this far above it, in metres. */
+export const wristFootprintM = (config: SkillConfig, heightM: number) =>
+  Math.max(0, heightM) * config.wristFootprintRatio;
+
+export interface RasterCoverage {
+  /** Mat the camera sees at scan height. */
+  readonly footprintM: number;
+  /** Radial distance between successive arcs. */
+  readonly radialStepM: number;
+  /** Arc length the tip travels between two looks, at the widest arc. */
+  readonly angularStepM: number;
+  /** Largest gap the raster leaves against the footprint. */
+  readonly worstStepM: number;
+  readonly tiles: boolean;
+}
+
+/**
+ * Whether the search raster actually tiles the mat it sweeps.
+ *
+ * Three arcs only find a piece if the camera sees further than the raster
+ * steps, in both directions: radially between arcs, and along an arc between
+ * looks. That was an assumption written in a comment and asserted nowhere,
+ * which is the kind of thing that turns into a blind 480-second sweep. The
+ * search checks it before it moves.
+ */
+export const rasterCoverage = (config: SkillConfig): RasterCoverage => {
+  const footprintM = wristFootprintM(config, config.scanHeightM);
+  const radialStepM = Math.abs(config.scanReachStepM);
+  // The scan looks every second move, and each move is capped at moveCapDeg.
+  const perLookDeg = 2 * config.moveCapDeg;
+  const angularStepM = config.maxReachM * (perLookDeg * (Math.PI / 180));
+  const worstStepM = Math.max(radialStepM, angularStepM);
+  return {
+    footprintM,
+    radialStepM,
+    angularStepM,
+    worstStepM,
+    tiles: footprintM > worstStepM,
+  };
+};
 
 export const offsetOf = (view: WristView | null, config: SkillConfig) =>
   view?.visible && view.x !== null && view.y !== null
@@ -470,6 +525,19 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
   };
   if (await check()) {
     return result("scan_for_piece", "done", "piece already in view", 0);
+  }
+  // A raster that steps further than the camera sees leaves rings of mat
+  // unlooked-at, and the run reads as "swept everything, found nothing".
+  // Refuse before moving rather than sweep blind for the whole budget.
+  const coverage = rasterCoverage(ctx.config);
+  if (!coverage.tiles) {
+    return result(
+      "scan_for_piece",
+      "vetoed",
+      `search raster leaves gaps: steps ${round(coverage.worstStepM)} m between looks ` +
+        `but the camera sees ${round(coverage.footprintM)} m at ${round(ctx.config.scanHeightM)} m`,
+      0
+    );
   }
   // The wrist camera sits above the fingertips and looks along them, so a
   // hover a few centimetres over the mat covers only about a hand's width of

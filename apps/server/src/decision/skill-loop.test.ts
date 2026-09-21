@@ -154,7 +154,8 @@ const runWith = async (
   piece: Vec3,
   maxSeconds = 120,
   placeBack = false,
-  cameraStallsAt: readonly number[] = []
+  cameraStallsAt: readonly number[] = [],
+  configOverride: Partial<SkillConfig> = {}
 ) => {
   const sim = simulate(piece, hover, cameraStallsAt);
   const events: { event: string; data: Record<string, unknown> }[] = [];
@@ -168,7 +169,7 @@ const runWith = async (
     },
     {
       mode: "execute",
-      config,
+      config: { ...config, ...configOverride },
       maxMoves: 400,
       maxSeconds,
       maxJudgments: 60,
@@ -321,4 +322,26 @@ test("the tip is never driven past the reach the joints can hold", async () => {
   const { sim } = await runWith(rulesTactician(), matPiece(0.32, 0.05));
   const furthest = Math.max(...sim.tips().map((t) => Math.hypot(t[0], t[1])));
   expect(furthest).toBeLessThanOrEqual(config.maxReachM + 0.01);
+});
+
+test("a search raster that outsteps the camera is refused before it moves", async () => {
+  // The three-arc raster only works because the camera sees further than the
+  // raster steps. Widen the step past the footprint and the search must say
+  // so rather than sweep rings of mat it never looks at -- the failure mode
+  // that reads as "swept everything, found nothing" in a run log.
+  const { events, sim } = await runWith(
+    rulesTactician(),
+    // Out of the initial view, so the search actually has to raster.
+    matPiece(0.12, 0.17),
+    120,
+    false,
+    [],
+    { scanReachStepM: -0.25 }
+  );
+  const scan = events.find(
+    (e) => e.event === "skill_finished" && e.data["skill"] === "scan_for_piece"
+  );
+  expect(String(scan?.data["result"])).toBe("vetoed");
+  expect(String(scan?.data["detail"])).toContain("leaves gaps");
+  expect(sim.moves()).toBe(0);
 });
