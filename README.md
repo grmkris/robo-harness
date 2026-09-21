@@ -43,13 +43,13 @@ The iframe's internal timeline can be paused independently. The persistent label
 
 ## Providers
 
-Alibaba Token Plan uses its compatible API through our own loop. xAI uses an API key or an explicitly configured Grok auth file, reread for each request. The Grok CLI remains the sole owner of token refresh; this app will not rotate or copy its refresh token.
+Alibaba Token Plan uses its compatible API through our own loop. xAI uses an API key or an explicitly configured Grok auth file, reread for each request. The Grok CLI remains the sole owner of token refresh; this app will not rotate or copy its refresh token. On netcup both providers are pointed at the cliproxy gateway (`ROBO_ALIBABA_URL` / `ROBO_XAI_URL` = `http://127.0.0.1:8317/v1`, key `CLIPROXY_API_KEY_ROBO`); documented image support carries over to the gateway host.
 
 Claude and Codex subscription adapters are visibly unavailable until their direct custom-loop route is verified. External Claude/Codex agents can use the MCP server now. There is no substitution of native agent runtimes for the custom loop.
 
 The model loop supports streaming, tool execution, observation images, steering, cancellation, persisted conversations, bounded step counts, and basic complete-turn context trimming. Provider errors are redacted before reaching the journal.
 
-TypeSafe's Jev (`typesafe-ai/jev`) is an evaluation model, not a chat provider: the decision runner calls it through the AI SDK `experimental_evaluate` API on Vercel AI Gateway with `AI_GATEWAY_API_KEY` (paid Gateway credits; free credits exclude it, and zero data retention is opt-in with `ROBO_JEV_ZDR=1` on Pro/Enterprise plans). Cumulative spend is capped by `ROBO_JEV_BUDGET_USD` (default 10). The optional scene describer for pickup runs uses an OpenAI-compatible endpoint (cliproxy by default, `CLIPROXY_API_KEY` or `ROBO_SCENE_*`).
+TypeSafe's Jev (`typesafe-ai/jev`) is an evaluation model, not a chat provider: the decision runner calls it through the AI SDK `experimental_evaluate` API on Vercel AI Gateway with `AI_GATEWAY_API_KEY` (paid Gateway credits; free credits exclude it, and zero data retention is opt-in with `ROBO_JEV_ZDR=1` on Pro/Enterprise plans). Cumulative spend is capped by `ROBO_JEV_BUDGET_USD` (default 10). The optional scene describer for pickup runs uses an OpenAI-compatible endpoint (cliproxy by default, `ROBO_SCENE_*`, falling back to `CLIPROXY_API_KEY`).
 
 See `.env.example` for configuration. Credentials from Invok are not imported automatically.
 
