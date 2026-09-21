@@ -71,7 +71,7 @@ export async function catalog(): Promise<ProviderInfo[]> {
     "ROBO_ALIBABA_MODELS"
   );
   const xaiModels = modelList(
-    process.env["ROBO_XAI_MODEL"] ?? "grok-4.6",
+    process.env["ROBO_XAI_MODEL"] ?? "grok-4.7",
     "ROBO_XAI_MODELS"
   );
   const capabilityList = (
@@ -116,7 +116,7 @@ export async function catalog(): Promise<ProviderInfo[]> {
       id: "xai",
       name: "xAI / Grok",
       available: xai,
-      model: xaiModels[0] ?? "grok-4.6",
+      model: xaiModels[0] ?? "grok-4.7",
       models: xaiModels,
       vision: xaiCapabilities[0]?.image_input ?? false,
       capabilities: xaiCapabilities,

@@ -36,9 +36,11 @@ export const modelCapabilities = (
       host.endsWith(".aliyuncs.com") ||
       host.endsWith(".alibabacloud.com"));
   const xai = provider === "xai" && (gateway || host === "api.x.ai");
+  // grok-4.7 (2026-09-21) and grok-4.6 document image input through the gateway
+  const xaiVision = new Set(["grok-4.7", "grok-4.6"]);
   const documented =
     (alibaba && (alibabaVision.has(model) || alibabaText.has(model))) ||
-    (xai && model === "grok-4.6");
+    (xai && xaiVision.has(model));
   const configured = options.visionModels?.includes(model) ?? false;
   return {
     model,
@@ -46,7 +48,7 @@ export const modelCapabilities = (
       !options.disableVision &&
       (configured ||
         (alibaba && alibabaVision.has(model)) ||
-        (xai && model === "grok-4.6")),
+        (xai && xaiVision.has(model))),
     tool_calling: true,
     strict_tools: false,
     parallel_control: provider === "alibaba" || xai,

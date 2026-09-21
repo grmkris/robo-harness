@@ -48,6 +48,10 @@ test("the cliproxy gateway inherits documented image support", () => {
     modelCapabilities("alibaba", gateway, "qwen3-coder-next").image_input
   ).toBe(false);
   expect(modelCapabilities("xai", gateway, "grok-4.6").image_input).toBe(true);
+  expect(modelCapabilities("xai", gateway, "grok-4.7").image_input).toBe(true);
+  expect(modelCapabilities("xai", gateway, "grok-4.7").source).toBe(
+    "documented"
+  );
   expect(modelCapabilities("xai", gateway, "grok-4.6").source).toBe(
     "documented"
   );
