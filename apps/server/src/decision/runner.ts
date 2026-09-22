@@ -22,6 +22,7 @@ import { buildScene } from "./scene-state";
 import { runSkillLoop } from "./skill-loop";
 import {
   newMemory,
+  rasterCoverage,
   skillDefaults,
   type MoveOutcome,
   type SkillConfig,
@@ -251,6 +252,9 @@ export const previewDecision = async (request: DecisionRunRequest) => {
       measured: obs.measured,
       scene,
       rules_next: judgment.next,
+      // The search refuses to sweep a raster that does not tile, and that
+      // depends only on configuration: show it here, before a run is spent.
+      raster: rasterCoverage(config),
       motor_writes: 0,
     };
   }

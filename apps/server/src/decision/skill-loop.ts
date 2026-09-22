@@ -240,6 +240,12 @@ export const runSkillLoop = async (
       ...outcome,
       moves_used: memory.movesUsed,
     });
+    if (outcome.fatal) {
+      // Nothing about the run can change this answer, so stop with the reason
+      // rather than re-choosing until the no-progress cap hides it.
+      endReason = `misconfigured: ${outcome.detail}`;
+      break;
+    }
     if (memory.movesUsed >= options.maxMoves) {
       endReason = "move_budget";
       break;

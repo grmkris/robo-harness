@@ -171,6 +171,13 @@ export interface SkillResult {
   readonly detail: string;
   readonly moves: number;
   readonly imageMoved: number | null;
+  /**
+   * The cause is the run's configuration, not its state: running this skill
+   * again, or any other, gives the same answer. The loop stops on one of
+   * these instead of re-choosing its way to a no-progress stop, which reports
+   * the symptom and loses the reason.
+   */
+  readonly fatal?: boolean;
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
@@ -532,8 +539,9 @@ const result = (
   kind: SkillResultKind,
   detail: string,
   moves: number,
-  imageMoved: number | null = null
-): SkillResult => ({ skill, result: kind, detail, moves, imageMoved });
+  imageMoved: number | null = null,
+  fatal = false
+): SkillResult => ({ skill, result: kind, detail, moves, imageMoved, fatal });
 
 const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
   const startMoves = ctx.memory.movesUsed;
@@ -559,7 +567,10 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
       `search raster leaves gaps: steps ${round(coverage.worstStepM)} m between looks, ` +
         `which needs ${round(coverage.requiredM)} m of footprint, ` +
         `but the camera sees ${round(coverage.footprintM)} m at ${round(ctx.config.scanHeightM)} m`,
-      0
+      0,
+      null,
+      // The raster comes from the configuration and cannot improve mid-run.
+      true
     );
   }
   // The wrist camera sits above the fingertips and looks along them, so a

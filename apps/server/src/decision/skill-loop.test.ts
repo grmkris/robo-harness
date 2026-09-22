@@ -345,3 +345,21 @@ test("a search raster that outsteps the camera is refused before it moves", asyn
   expect(String(scan?.data["detail"])).toContain("leaves gaps");
   expect(sim.moves()).toBe(0);
 });
+
+test("a raster that cannot tile stops the run with the reason, not six vetoes later", async () => {
+  // The footprint is configuration: re-choosing the search cannot improve it,
+  // and a no-progress stop would report the symptom and lose the cause.
+  const { summary, events } = await runWith(
+    rulesTactician(),
+    // Out of the initial view, so the search is the first skill chosen.
+    matPiece(0.12, 0.17),
+    120,
+    false,
+    [],
+    { wristFootprintRatio: 0.2 }
+  );
+  expect(summary.end_reason).toContain("misconfigured");
+  expect(summary.end_reason).toContain("search raster leaves gaps");
+  expect(summary.skills_run).toBe(1);
+  expect(events.filter((e) => e.event === "skill_finished")).toHaveLength(1);
+});
