@@ -4,7 +4,7 @@ Accepted 2026-09-17. Implements the SO-101 lab brief "Proposed experiment — Je
 
 ## Problem
 
-The experiment asks whether an evaluation model — TypeSafe's Jev (`typesafe-ai/jev`) through Vercel AI Gateway — can pick the next useful action for the real arm while existing controllers enforce every limit. Jev is not a chat model: it answers typed Choice/Score/Boolean questions about text or JSON state, through the AI SDK `experimental_evaluate` API only. An external loop over `/api/tool/*` would re-implement acquisition, renewal and completion polling, and it meets the 250 ms cached-observation gate on most calls from netcup. The coordinator already has a supervised executor with a ledger, reconciliation and Stop/takeover aborts.
+The experiment asks whether an evaluation model — TypeSafe's Jev (`typesafe-ai/jev`) through Vercel AI Gateway — can pick the next useful action for the real arm while existing controllers enforce every limit. Jev is not a chat model: it answers typed Choice/Score/Boolean questions about text or JSON state, through the TanStack `decide()` API with `@tanstack/ai-vercel-gateway` only. An external loop over `/api/tool/*` would re-implement acquisition, renewal and completion polling, and it meets the 250 ms cached-observation gate on most calls from netcup. The coordinator already has a supervised executor with a ledger, reconciliation and Stop/takeover aborts.
 
 ## Decision
 

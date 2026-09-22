@@ -57,7 +57,7 @@ const QUESTIONS = {
     criteria: NEXT_SKILL_OPTIONS,
   },
   grasp_ready: {
-    type: "boolean" as const,
+    type: "noul" as const,
     instructions:
       "Would closing the gripper now capture the piece? It needs the tip at grasp height, the jaws open, and the piece centred between them.",
     criteria: {
@@ -76,7 +76,7 @@ const QUESTIONS = {
     ],
   },
   piece_held: {
-    type: "boolean" as const,
+    type: "noul" as const,
     instructions:
       "Is the piece actually held in the gripper? Judge from observed.gripper.stalled_on_object, observed.gripper.holding and whether the piece is still seen between the jaws.",
   },
@@ -110,7 +110,7 @@ export const jevTactician = (evaluate: Evaluator): Tactician => ({
     });
     const next = choiceAnswer(outcome.answers["next_skill"], choices);
     return {
-      next: next.choice as TacticChoice,
+      next: next.value as TacticChoice,
       probabilities: next.probabilities,
       graspReady: booleanAnswer(outcome.answers["grasp_ready"]),
       risk: scoreAnswer(

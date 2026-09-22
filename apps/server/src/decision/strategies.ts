@@ -1,9 +1,10 @@
 import { joints } from "@robo/domain";
 import type { Joint } from "@robo/domain";
+import type { ChoiceAnswer, WireQuestion } from "@tanstack/ai";
 
 import type { Action, StepAction } from "./candidates";
 import { booleanAnswer, choiceAnswer } from "./jev";
-import type { ChoiceAnswer, Evaluator, Usage } from "./jev";
+import type { Evaluator, Usage } from "./jev";
 import { criteriaOf, type DecisionState } from "./state";
 
 export const strategyNames = ["choice", "parallel", "critic", "rules"] as const;
@@ -191,7 +192,7 @@ export const choiceDecider = (evaluate: Evaluator): Decider => ({
     });
     const answer = choiceAnswer(outcome.answers["nextAction"], ids);
     return {
-      action_id: answer.choice,
+      action_id: answer.value,
       strategy: "choice",
       model: outcome.model,
       probabilities: answer.probabilities,
@@ -229,8 +230,8 @@ const parallelDecider = (evaluate: Evaluator): Decider => ({
     const movable = joints.filter((joint) =>
       steps.some((action) => action.joint === joint)
     );
-    const questions: Record<string, never> = {};
-    const add = (id: string, question: unknown) => {
+    const questions: Record<string, WireQuestion> = {};
+    const add = (id: string, question: WireQuestion) => {
       Object.assign(questions, { [id]: question });
     };
     add("terminate", {
@@ -239,7 +240,7 @@ const parallelDecider = (evaluate: Evaluator): Decider => ({
       criteria: terminateOptions,
     });
     add("act", {
-      type: "boolean",
+      type: "noul",
       instructions:
         "Is the current observation usable and is a motion step appropriate right now?",
       criteria: {
@@ -283,8 +284,8 @@ const parallelDecider = (evaluate: Evaluator): Decider => ({
     };
     let actionId = "reobserve";
     let note: string | null = null;
-    if (terminate.choice !== "continue") {
-      actionId = terminate.choice;
+    if (terminate.value !== "continue") {
+      actionId = terminate.value;
     } else if (act >= 0.5 && movable.length > 0) {
       const joint = choiceAnswer(outcome.answers["joint"], movable);
       const direction = choiceAnswer(outcome.answers["direction"], [
@@ -293,16 +294,16 @@ const parallelDecider = (evaluate: Evaluator): Decider => ({
       ]);
       answers.joint = joint;
       answers.direction = direction;
-      const sign = direction.choice === "increase" ? 1 : -1;
+      const sign = direction.value === "increase" ? 1 : -1;
       const match = steps.find(
         (action) =>
-          action.joint === (joint.choice as Joint) &&
+          action.joint === (joint.value as Joint) &&
           Math.sign(action.delta) === sign
       );
       if (match) {
         actionId = match.id;
       } else {
-        note = `composition miss: ${joint.choice} ${direction.choice} is not offered`;
+        note = `composition miss: ${joint.value} ${direction.value} is not offered`;
       }
     } else if (act < 0.5) {
       note = "act < 0.5";
@@ -349,7 +350,7 @@ const criticDecider = (evaluate: Evaluator): Decider => ({
       },
       questions: {
         safe: {
-          type: "boolean",
+          type: "noul",
           instructions:
             "Given the evidence, is executing the proposed action now safe and useful for the task?",
           criteria: {
@@ -359,7 +360,7 @@ const criticDecider = (evaluate: Evaluator): Decider => ({
           },
         },
         complete: {
-          type: "boolean",
+          type: "noul",
           instructions: "Is the task already verifiably complete?",
         },
       },

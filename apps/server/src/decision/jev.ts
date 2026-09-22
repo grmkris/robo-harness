@@ -1,6 +1,13 @@
-import type { Experimental_EvaluationModelV4 } from "@ai-sdk/provider";
-import { experimental_evaluate as evaluate } from "ai";
-import type { Experimental_EvaluationQuestion } from "ai";
+import { decide } from "@tanstack/ai";
+import type {
+  BooleanAnswer,
+  ChoiceAnswer,
+  EvaluateAdapter,
+  ScoreAnswer,
+  WireQuestion,
+} from "@tanstack/ai";
+import { createVercelGatewayDecider } from "@tanstack/ai-vercel-gateway";
+import type { EvaluateState } from "@tanstack/ai/adapters";
 import { Effect } from "effect";
 
 const JEV_MODEL = "typesafe-ai/jev";
@@ -48,7 +55,7 @@ export interface Rate {
   readonly source: string;
 }
 
-const fallbackRate: Rate = {
+export const fallbackRate: Rate = {
   input: 0.042e-6,
   output: 0,
   source: "fallback: Gateway catalog 2026-09-17",
@@ -115,7 +122,7 @@ interface ErrorFields {
   readonly message?: unknown;
 }
 
-/** Map AI SDK / Gateway errors to distinct kinds, without request details. */
+/** Map TanStack / Gateway errors to distinct kinds, without request details. */
 const classify = (error: unknown): DecideFailure => {
   if (error instanceof DecideFailure) {
     return error;
@@ -124,12 +131,24 @@ const classify = (error: unknown): DecideFailure => {
     typeof error === "object" && error !== null ? error : {};
   const name = typeof fields.name === "string" ? fields.name : "";
   const type = typeof fields.type === "string" ? fields.type : "";
-  const status =
-    typeof fields.statusCode === "number" ? fields.statusCode : undefined;
   const message =
     (typeof fields.message === "string" ? fields.message : String(error))
       .split("\n")[0]
       ?.slice(0, 240) ?? "";
+  const status =
+    typeof fields.statusCode === "number"
+      ? fields.statusCode
+      : Number(
+          /request failed: (?<status>\d{3})/u.exec(message)?.groups?.["status"]
+        );
+  if (
+    message.startsWith("decide():") ||
+    /^Vercel Gateway evaluate (?:answer|response|choice answer|boolean answer|score answer)/u.test(
+      message
+    )
+  ) {
+    return new DecideFailure("invalid_answer", message);
+  }
   // Typed Gateway errors first: an authentication message also names the variable.
   if (type === "authentication_error" || status === 401) {
     return new DecideFailure(
@@ -170,10 +189,10 @@ const classify = (error: unknown): DecideFailure => {
   return new DecideFailure("provider", `${name || "Error"}: ${message}`);
 };
 
-type Questions = Readonly<Record<string, Experimental_EvaluationQuestion>>;
+type Questions = Record<string, WireQuestion>;
 
 interface EvaluateRequest {
-  readonly state: unknown;
+  readonly state: EvaluateState;
   readonly questions: Questions;
   readonly signal: AbortSignal;
 }
@@ -184,7 +203,9 @@ export interface Usage {
 }
 
 interface EvaluateOutcome {
-  readonly answers: Readonly<Record<string, unknown>>;
+  readonly answers: Readonly<
+    Record<string, ChoiceAnswer | BooleanAnswer | ScoreAnswer>
+  >;
   readonly usage: Usage;
   readonly cost_usd: number;
   readonly latency_ms: number;
@@ -201,8 +222,8 @@ const zeroDataRetention = () => process.env["ROBO_JEV_ZDR"] === "1";
 export type Evaluator = (request: EvaluateRequest) => Promise<EvaluateOutcome>;
 
 export interface EvaluatorOptions {
-  /** A model instance (tests, mocks) or the Gateway model ID. */
-  readonly model?: Experimental_EvaluationModelV4 | string;
+  /** Local adapters exercise the same decide() path without a provider call. */
+  readonly adapter?: EvaluateAdapter;
   readonly timeoutMs?: number;
   readonly meter: SpendMeter;
 }
@@ -214,27 +235,38 @@ export interface EvaluatorOptions {
 export const jevEvaluator =
   (options: EvaluatorOptions): Evaluator =>
   async (request) => {
-    const model = options.model ?? JEV_MODEL;
-    if (typeof model === "string" && !process.env["AI_GATEWAY_API_KEY"]) {
+    if (request.signal.aborted) {
+      throw new DecideFailure("aborted", "run cancelled");
+    }
+    const key = process.env["AI_GATEWAY_API_KEY"];
+    if (!options.adapter && !key) {
       throw new DecideFailure(
         "missing_credentials",
         "AI_GATEWAY_API_KEY is not set"
       );
     }
+    const adapter =
+      options.adapter ??
+      createVercelGatewayDecider(JEV_MODEL, key ?? "", {
+        defaultHeaders: { "ai-gateway-auth-method": "api-key" },
+      });
     options.meter.reserve();
     const timeoutMs = options.timeoutMs ?? 8000;
     const started = performance.now();
     const call = Effect.tryPromise({
       try: (signal) =>
-        evaluate({
-          model,
-          state: request.state as never,
+        decide({
+          adapter,
+          state: request.state,
           questions: request.questions,
-          maxRetries: 0,
           abortSignal: AbortSignal.any([signal, request.signal]),
-          providerOptions: {
-            gateway: { zeroDataRetention: zeroDataRetention() },
+          modelOptions: {
+            gateway: {
+              only: ["typesafe-ai"],
+              zeroDataRetention: zeroDataRetention(),
+            },
           },
+          debug: false,
         }),
       catch: (error) => error,
     }).pipe(
@@ -248,18 +280,19 @@ export const jevEvaluator =
     );
     try {
       const result = await Effect.runPromise(call, { signal: request.signal });
-      const inputTokens = result.usage.inputTokens ?? null;
-      const outputTokens = result.usage.outputTokens ?? null;
+      const { meta, ...answers } = result;
+      const inputTokens = meta.usage.promptTokens ?? null;
+      const outputTokens = meta.usage.completionTokens ?? null;
       const cost =
         (inputTokens ?? 0) * options.meter.rate.input +
         (outputTokens ?? 0) * options.meter.rate.output;
       options.meter.record(cost);
       return {
-        answers: result.answers,
+        answers,
         usage: { inputTokens, outputTokens },
         cost_usd: cost,
         latency_ms: Math.round(performance.now() - started),
-        model: result.response.modelId,
+        model: meta.model,
       };
     } catch (error) {
       if (request.signal.aborted) {
@@ -269,96 +302,58 @@ export const jevEvaluator =
     }
   };
 
-interface AnswerFields {
-  readonly type?: unknown;
-  readonly choice?: unknown;
-  readonly probability?: unknown;
-  readonly probabilities?: unknown;
-}
+const isProbability = (value: number): boolean =>
+  Number.isFinite(value) && value >= 0 && value <= 1;
 
-const fieldsOf = (answer: unknown): AnswerFields =>
-  typeof answer === "object" && answer !== null ? answer : {};
+type Answer = ChoiceAnswer | BooleanAnswer | ScoreAnswer | undefined;
 
-const isProbability = (value: unknown): value is number =>
-  typeof value === "number" &&
-  Number.isFinite(value) &&
-  value >= 0 &&
-  value <= 1;
-
-export interface ChoiceAnswer {
-  readonly choice: string;
-  readonly probabilities: Readonly<Record<string, number>> | null;
-}
-
-/** Choice answer: an offered option and, when present, a normalised distribution. */
+/** Only offered choices with a normalised distribution can reach the controller. */
 export const choiceAnswer = (
-  answer: unknown,
+  answer: Answer,
   options: readonly string[]
 ): ChoiceAnswer => {
-  const fields = fieldsOf(answer);
-  if (
-    fields.type !== "choice" ||
-    typeof fields.choice !== "string" ||
-    !options.includes(fields.choice)
-  ) {
+  if (answer?.type !== "choice" || !options.includes(answer.value)) {
     throw new DecideFailure(
       "invalid_answer",
-      `choice ${JSON.stringify(fields.choice)} is not an offered option`
+      "choice is not an offered option"
     );
   }
-  if (fields.probabilities === undefined) {
-    return { choice: fields.choice, probabilities: null };
-  }
-  if (
-    typeof fields.probabilities !== "object" ||
-    fields.probabilities === null
-  ) {
-    throw new DecideFailure("invalid_answer", "probabilities is not an object");
-  }
-  const probabilities: Record<string, number> = {};
   let sum = 0;
-  for (const [option, value] of Object.entries(fields.probabilities)) {
+  for (const [option, value] of Object.entries(answer.probabilities)) {
     if (!options.includes(option) || !isProbability(value)) {
       throw new DecideFailure(
         "invalid_answer",
         `bad probability for ${option}`
       );
     }
-    probabilities[option] = value;
     sum += value;
   }
-  if (Math.abs(sum - 1) > 0.02) {
+  if (!isProbability(answer.probability) || Math.abs(sum - 1) > 0.02) {
     throw new DecideFailure("invalid_answer", `probabilities sum to ${sum}`);
   }
-  return { choice: fields.choice, probabilities };
+  return answer;
 };
 
 /** Boolean answer: P(true) in [0, 1]. */
-export const booleanAnswer = (answer: unknown): number => {
-  const fields = fieldsOf(answer);
-  if (fields.type !== "boolean" || !isProbability(fields.probability)) {
+export const booleanAnswer = (answer: Answer): number => {
+  if (answer?.type !== "boolean" || !isProbability(answer.probability)) {
     throw new DecideFailure(
       "invalid_answer",
       "boolean answer lacks a valid probability"
     );
   }
-  return fields.probability;
+  return answer.probability;
 };
 
 /** Score answer: interpolated level in [0, levels-1]. */
-export const scoreAnswer = (answer: unknown, levels: number): number => {
-  const fields = fieldsOf(answer) as AnswerFields & {
-    readonly score?: unknown;
-  };
-  const score = fields.score;
+export const scoreAnswer = (answer: Answer, levels: number): number => {
   if (
-    fields.type !== "score" ||
-    typeof score !== "number" ||
-    !Number.isFinite(score) ||
-    score < 0 ||
-    score > levels - 1
+    answer?.type !== "score" ||
+    !Number.isFinite(answer.score) ||
+    answer.score < 0 ||
+    answer.score > levels - 1
   ) {
     throw new DecideFailure("invalid_answer", "score answer out of range");
   }
-  return score;
+  return answer.score;
 };

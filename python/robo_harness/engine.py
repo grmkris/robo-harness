@@ -446,7 +446,7 @@ class Engine:
                 if self.seq % TEMPERATURE_EVERY_TICKS == 0 and hasattr(self.driver, "temperatures"):
                     try:
                         self.temperatures = self.driver.temperatures()
-                    except Exception:  # noqa: BLE001 - telemetry must never fault control
+                    except Exception:  # telemetry must never fault control
                         self.temperatures = None
                 # Reads may block beyond the tick deadline or the lease. Never
                 # use the pre-read timestamp to authorize another motion command.

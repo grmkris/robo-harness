@@ -49,7 +49,7 @@ Claude and Codex subscription adapters are visibly unavailable until their direc
 
 The model loop supports streaming, tool execution, observation images, steering, cancellation, persisted conversations, bounded step counts, and basic complete-turn context trimming. Provider errors are redacted before reaching the journal.
 
-TypeSafe's Jev (`typesafe-ai/jev`) is an evaluation model, not a chat provider: the decision runner calls it through the AI SDK `experimental_evaluate` API on Vercel AI Gateway with `AI_GATEWAY_API_KEY` (paid Gateway credits; free credits exclude it, and zero data retention is opt-in with `ROBO_JEV_ZDR=1` on Pro/Enterprise plans). Cumulative spend is capped by `ROBO_JEV_BUDGET_USD` (default 10). The optional scene describer for pickup runs uses an OpenAI-compatible endpoint (cliproxy by default, `ROBO_SCENE_*`, falling back to `CLIPROXY_API_KEY`).
+TypeSafe's Jev (`typesafe-ai/jev`) is an evaluation model, not a chat provider: the decision runner calls it through the TanStack `decide()` API with `@tanstack/ai-vercel-gateway` on Vercel AI Gateway with `AI_GATEWAY_API_KEY` (paid Gateway credits; free credits exclude it, and zero data retention is opt-in with `ROBO_JEV_ZDR=1` on Pro/Enterprise plans). Cumulative spend is capped by `ROBO_JEV_BUDGET_USD` (default 10). The optional scene describer for pickup runs uses an OpenAI-compatible endpoint (cliproxy by default, `ROBO_SCENE_*`, falling back to `CLIPROXY_API_KEY`).
 
 See `.env.example` for configuration. Credentials from Invok are not imported automatically.
 

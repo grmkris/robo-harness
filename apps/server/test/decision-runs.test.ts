@@ -29,7 +29,7 @@ test("the offline smoke passes through the SDK mock and a live smoke without a k
     await h.request("/api/decision/smoke", { decider: "mock" })
   ).json();
   expect(mock.status).toBe("passed");
-  expect(mock.answer.choice).toBe("reobserve");
+  expect(mock.answer.value).toBe("reobserve");
   // The harness gives the app no Gateway key, so this half asserts the
   // missing-credential path without calling out to a live model.
   const live = await (

@@ -226,7 +226,7 @@ test("the search never gives back the height it climbed", async () => {
   }
 });
 
-test("a Jev tactician through the AI SDK evaluate path completes the pickup and reuses cached judgments", async () => {
+test("a Jev tactician through the TanStack decide path completes the pickup and reuses cached judgments", async () => {
   const tactician = jevTactician(
     mockTacticsEvaluator(
       memoryMeter({ input: 0.042e-6, output: 0, source: "test" }, 1)

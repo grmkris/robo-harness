@@ -1,10 +1,10 @@
-import type { Experimental_EvaluationModelV4Answer } from "@ai-sdk/provider";
-import { Experimental_EvaluationMockModelV4 } from "ai/test";
+import type { WireAnswer } from "@tanstack/ai";
 
 import { candidates, defaultLimits, type Action } from "./candidates";
 import { fixtures } from "./fixtures";
 import {
   choiceAnswer,
+  fallbackRate,
   DecideFailure,
   jevEvaluator,
   jevRate,
@@ -12,7 +12,7 @@ import {
   type Evaluator,
   type SpendMeter,
 } from "./jev";
-import { mockEvaluator } from "./mock";
+import { localAdapter, mockEvaluator } from "./mock";
 import { sqliteMeter } from "./spend";
 import { decisionState } from "./state";
 import { deciderFor, type StrategyName } from "./strategies";
@@ -22,7 +22,7 @@ export type DeciderKind = "jev" | "mock";
 
 const aiVersion = async () => {
   const pkg = (await Bun.file(
-    new URL("../../node_modules/ai/package.json", import.meta.url)
+    new URL("../../node_modules/@tanstack/ai/package.json", import.meta.url)
   ).json()) as { version?: string };
   return pkg.version ?? "unknown";
 };
@@ -34,12 +34,13 @@ const smokeCriteria = {
 
 /** Gateway proof from the brief: a static fixture that never reaches motion. */
 export const runSmoke = async (kind: DeciderKind, timeoutMs = 8000) => {
-  const rate = await jevRate();
+  const rate = kind === "jev" ? await jevRate() : fallbackRate;
   const meter: SpendMeter =
     kind === "jev" ? sqliteMeter(rate) : memoryMeter(rate, 1);
-  const answer: Experimental_EvaluationModelV4Answer = {
+  const answer: WireAnswer = {
     type: "choice",
     choice: "reobserve",
+    confidence: 1,
     probabilities: { reobserve: 0.97, inspect: 0.03 },
   };
   const evaluate =
@@ -47,23 +48,18 @@ export const runSmoke = async (kind: DeciderKind, timeoutMs = 8000) => {
       ? jevEvaluator({ meter, timeoutMs })
       : jevEvaluator({
           meter,
-          model: new Experimental_EvaluationMockModelV4({
-            provider: "mock",
-            modelId: "mock-jev",
-            supportedQuestionTypes: ["choice"],
-            doEvaluate: () =>
-              Promise.resolve({
-                answers: { nextAction: answer },
-                usage: { inputTokens: 60, outputTokens: 0 },
-                warnings: [],
-                response: { modelId: "mock-jev" },
-              }),
-          }),
+          adapter: localAdapter(() =>
+            Promise.resolve({
+              answers: { nextAction: answer },
+              usage: { promptTokens: 60, completionTokens: 0, totalTokens: 60 },
+              model: "mock-jev",
+            })
+          ),
         });
   const base = {
     step: "gateway_proof",
     decider: kind,
-    ai_sdk: await aiVersion(),
+    tanstack_ai: await aiVersion(),
     rate,
   };
   try {
@@ -87,7 +83,7 @@ export const runSmoke = async (kind: DeciderKind, timeoutMs = 8000) => {
       status: "passed",
       model: outcome.model,
       answer: checked,
-      matches_expected: checked.choice === "reobserve",
+      matches_expected: checked.value === "reobserve",
       latency_ms: outcome.latency_ms,
       usage: outcome.usage,
       cost_usd: outcome.cost_usd,
@@ -131,7 +127,7 @@ export const runFixtures = async (
   signal: AbortSignal,
   timeoutMs = 8000
 ) => {
-  const rate = await jevRate();
+  const rate = kind === "jev" ? await jevRate() : fallbackRate;
   let offered: readonly Action[] = [];
   const evaluate: Evaluator =
     kind === "jev"

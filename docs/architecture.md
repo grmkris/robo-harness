@@ -30,7 +30,7 @@ Chat uses a small capability-gated facade over the low-level protocol. A coordin
 
 ## Decision runner
 
-`apps/server/src/decision/` runs observe → text perception → decide → validate → execute → observe the measured outcome → log, one step at a time. Candidates are complete bounded joint steps built in code; a decider (rules, or Jev through the AI SDK `experimental_evaluate` API) only picks an ID. Motion goes through the same executor instance as chat (`src/motion-executor.ts`), so admission, journaling, renewal, reconciliation and Stop/takeover aborts are shared, and chat and decision runs exclude each other. Images never reach the decision model; perception turns frames into numbers first. See [decision 0011](decisions/0011-decision-runner.md).
+`apps/server/src/decision/` runs observe → text perception → decide → validate → execute → observe the measured outcome → log, one step at a time. Candidates are complete bounded joint steps built in code; a decider (rules, or Jev through the TanStack `decide()` API with `@tanstack/ai-vercel-gateway`) only picks an ID. Motion goes through the same executor instance as chat (`src/motion-executor.ts`), so admission, journaling, renewal, reconciliation and Stop/takeover aborts are shared, and chat and decision runs exclude each other. Images never reach the decision model; perception turns frames into numbers first. See [decision 0011](decisions/0011-decision-runner.md).
 
 ## Interactive development terminal
 
