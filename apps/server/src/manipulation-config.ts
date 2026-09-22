@@ -15,7 +15,7 @@ const Point = Schema.Tuple([Metres, Metres]);
 const Degrees = Schema.Finite;
 const Row = Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]);
 
-export const HomePose = Schema.Struct({
+const HomePose = Schema.Struct({
   shoulder_pan: Schema.optionalKey(Degrees),
   shoulder_lift: Schema.optionalKey(Degrees),
   elbow_flex: Schema.optionalKey(Degrees),

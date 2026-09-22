@@ -12,38 +12,39 @@ afterEach(async () => {
  *  (an unrelated session's first) and records every request it saw. */
 const coordinator = (finishOnCancel = false) => {
   const seen: { path: string; auth: string | null; body: unknown }[] = [];
-  const events = [
-    {
-      id: 41,
-      type: "chat.finished",
-      data: { session_id: "other", run_id: "r" },
-    },
-    {
-      id: 42,
-      type: "chat.message",
-      data: { session_id: session, role: "user", text: "go" },
-    },
-    {
-      id: 43,
-      type: "chat.tool",
-      data: { session_id: session, name: "observe" },
-    },
-    {
-      id: 44,
-      type: "chat.message",
-      data: { session_id: session, role: "assistant", text: "Done." },
-    },
-    {
-      id: 45,
-      type: "chat.finished",
-      data: {
-        session_id: session,
-        run_id: "run-1",
-        steps: 2,
-        usage: { input_tokens: 30, output_tokens: 7, calls: 2 },
+  const events: { id: number; type: string; data: Record<string, unknown> }[] =
+    [
+      {
+        id: 41,
+        type: "chat.finished",
+        data: { session_id: "other", run_id: "r" },
       },
-    },
-  ];
+      {
+        id: 42,
+        type: "chat.message",
+        data: { session_id: session, role: "user", text: "go" },
+      },
+      {
+        id: 43,
+        type: "chat.tool",
+        data: { session_id: session, name: "observe" },
+      },
+      {
+        id: 44,
+        type: "chat.message",
+        data: { session_id: session, role: "assistant", text: "Done." },
+      },
+      {
+        id: 45,
+        type: "chat.finished",
+        data: {
+          session_id: session,
+          run_id: "run-1",
+          steps: 2,
+          usage: { input_tokens: 30, output_tokens: 7, calls: 2 },
+        },
+      },
+    ];
   let cancelled = Promise.withResolvers<null>();
   const server = Bun.serve({
     port: 0,

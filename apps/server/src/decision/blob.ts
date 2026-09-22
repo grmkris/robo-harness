@@ -51,7 +51,7 @@ const RING = 3;
 type Rejection = "too_small" | "too_large" | "edge" | "not_isolated";
 
 /** One connected bright region, in pixels of the source frame. */
-export interface BrightComponent {
+interface BrightComponent {
   readonly pixels: number;
   readonly areaFraction: number;
   readonly centerX: number;

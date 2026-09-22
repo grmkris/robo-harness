@@ -5,6 +5,7 @@ import { catalog, resolveModel } from "./providers";
 const keys = [
   "ROBO_CLIPROXY_URL",
   "ROBO_CLIPROXY_KEY",
+  "CLIPROXY_API_KEY",
   "ROBO_CLIPROXY_MODELS",
   "ROBO_CLIPROXY_VISION_MODELS",
   "ROBO_CLIPROXY_VISION",
@@ -66,7 +67,9 @@ test("cliproxy never sends parallel_tool_calls; the existing providers still do"
   expect((await resolveModel("alibaba")).modelOptions).toEqual({
     parallel_tool_calls: false,
   });
-  await expect(resolveModel("cliproxy", "not-listed")).rejects.toThrow(
-    "not available"
+  const failure = await resolveModel("cliproxy", "not-listed").catch(
+    (error: unknown) => error
   );
+  expect(failure).toBeInstanceOf(Error);
+  expect(String(failure)).toContain("not available");
 });

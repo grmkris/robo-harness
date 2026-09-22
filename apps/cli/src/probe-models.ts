@@ -13,11 +13,9 @@
  * Prints a table (or --json), with latency, token usage and error text.
  *
  * Environment: ROBO_CLIPROXY_URL (default http://127.0.0.1:8317/v1); the key
- * is ROBO_CLIPROXY_KEY, else CLIPROXY_API_KEY_ROBO, else that name read from
- * ~/.config/secrets.env. The key is never printed.
+ * is ROBO_CLIPROXY_KEY, CLIPROXY_API_KEY_ROBO or CLIPROXY_API_KEY. Credentials
+ * must be explicitly exported by the operator. The key is never printed.
  */
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 
 import { redSquarePng } from "./probe-image";
@@ -30,23 +28,13 @@ const { values: flags, positionals: models } = parseArgs({
 
 const baseUrl = process.env["ROBO_CLIPROXY_URL"] ?? "http://127.0.0.1:8317/v1";
 
-const proxyKey = async (): Promise<string> => {
+const proxyKey = (): string => {
   const direct =
-    process.env["ROBO_CLIPROXY_KEY"] ?? process.env["CLIPROXY_API_KEY_ROBO"];
+    process.env["ROBO_CLIPROXY_KEY"] ??
+    process.env["CLIPROXY_API_KEY_ROBO"] ??
+    process.env["CLIPROXY_API_KEY"];
   if (direct) return direct;
-  const file = await readFile(
-    `${homedir()}/.config/secrets.env`,
-    "utf-8"
-  ).catch(() => "");
-  const line = file
-    .split("\n")
-    .map((entry) => entry.trim().replace(/^export\s+/u, ""))
-    .find((entry) => entry.startsWith("CLIPROXY_API_KEY_ROBO="));
-  const value = line
-    ?.slice("CLIPROXY_API_KEY_ROBO=".length)
-    .replaceAll(/^["']|["']$/gu, "");
-  if (!value) throw new Error("No cliproxy key: set ROBO_CLIPROXY_KEY");
-  return value;
+  throw new Error("No cliproxy key: set ROBO_CLIPROXY_KEY");
 };
 
 const tool = {
@@ -195,7 +183,7 @@ const main = async () => {
     process.exitCode = flags.help ? 0 : 2;
     return;
   }
-  const key = await proxyKey();
+  const key = proxyKey();
   const image = `data:image/png;base64,${Buffer.from(redSquarePng()).toString("base64")}`;
   const results = await Promise.all(
     models.map((model) => probe(key, model, image))

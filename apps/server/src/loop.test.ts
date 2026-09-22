@@ -4,6 +4,7 @@ import { std } from "@robo/protocol";
 import {
   EventType,
   type ModelMessage,
+  type RunFinishedEvent,
   type StreamChunk,
   type Tool,
 } from "@tanstack/ai";
@@ -16,7 +17,7 @@ import { RobotChatAdapter } from "./provider-adapter";
 import { DOOM_LOOP_STOP } from "./stop-conditions";
 
 type RequestOptions = Parameters<ChatAdapter["chatStream"]>[0];
-const finished = (finishReason: "stop" | "tool_calls"): StreamChunk => ({
+const finished = (finishReason: "stop" | "tool_calls"): RunFinishedEvent => ({
   type: EventType.RUN_FINISHED,
   runId: "fixture",
   threadId: "fixture",

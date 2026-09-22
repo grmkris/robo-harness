@@ -25,7 +25,10 @@ const alibabaKey = () =>
 const cliproxyDefault = "http://127.0.0.1:8317/v1";
 const cliproxyUrl = () => process.env["ROBO_CLIPROXY_URL"] ?? cliproxyDefault;
 const cliproxyKey = () =>
-  process.env["ROBO_CLIPROXY_KEY"] || process.env["XAI_API_KEY"] || undefined;
+  process.env["ROBO_CLIPROXY_KEY"] ||
+  process.env["CLIPROXY_API_KEY"] ||
+  process.env["XAI_API_KEY"] ||
+  undefined;
 async function xaiToken() {
   if (process.env["XAI_API_KEY"]) {
     return process.env["XAI_API_KEY"];
