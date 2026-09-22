@@ -14,6 +14,7 @@ from .kinematics import JOINTS
 
 # The control loop must observe and command within this deadline or the lease is dropped.
 CONTROL_DEADLINE_S = 0.25
+TEMPERATURE_EVERY_TICKS = 30
 MAX_REQUEST_ID = 128
 MIN_DURATION_S = 0.1
 MAX_DURATION_S = 10
@@ -51,6 +52,9 @@ class Engine:
         self.operations: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
         self.fault: str | None = None
         self.seq = 0
+        # Servo temperatures, sampled about once a second: an extra bus read
+        # every tick would cost the motor loop its deadline.
+        self.temperatures: dict[str, int] | None = None
         self.last_observed = clock()
         self.last_wall_ms = time.time() * 1000
         self.last_tick = clock()
@@ -80,6 +84,7 @@ class Engine:
                 "units": {**dict.fromkeys(JOINTS[:-1], "degrees"), "gripper": "percent"},
                 "measured": self.measured.copy(),
                 "commanded": self.commanded.copy(),
+                "temperatures": None if self.temperatures is None else self.temperatures.copy(),
                 "ee": self.kin.xyz(self.measured).tolist(),
                 "frames": {k: v.tolist() for k, v in frames.items()},
                 "operator": None
@@ -337,7 +342,10 @@ class Engine:
                 or not lo <= v <= hi
             ):
                 raise ControlError(f"{j} target exceeds commissioned limits", 422)
-            delta = abs(v - start[j])
+            # Measured from where the trajectory starts: a held joint's origin
+            # is its command, so a gripper stalled on an object (measured a few
+            # percent off its command) is not "moving" at all (2026-09-22).
+            delta = abs(v - origin[j])
             if delta > self.profile["max_step"] + 1e-8:
                 raise ControlError(f"{j} move exceeds maximum per-operation step", 422)
             if delta / duration_s > self.profile["max_speed"] + 1e-8:
@@ -435,6 +443,11 @@ class Engine:
                 self.last_observed = now
                 self.last_wall_ms = time.time() * 1000
                 self.seq += 1
+                if self.seq % TEMPERATURE_EVERY_TICKS == 0 and hasattr(self.driver, "temperatures"):
+                    try:
+                        self.temperatures = self.driver.temperatures()
+                    except Exception:  # noqa: BLE001 - telemetry must never fault control
+                        self.temperatures = None
                 # Reads may block beyond the tick deadline or the lease. Never
                 # use the pre-read timestamp to authorize another motion command.
                 self._expire_control(deadline)

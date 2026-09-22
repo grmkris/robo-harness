@@ -586,3 +586,26 @@ def test_a_move_is_judged_on_the_joints_it_asked_to_move(rig):
     assert done["status"] == "completed"
     # The sag is still reported, it just does not decide the verdict.
     assert done["residual"]["shoulder_lift"] > 0.8
+
+
+def test_a_held_gripper_stalled_off_its_command_does_not_fail_the_speed_check(rig):
+    e, _ = rig
+    lease = e.acquire("agent")
+    # Jaws closed on an object stop several percent short of their command.
+    e.measured = {**e.measured, "gripper": e.commanded["gripper"] + 6}
+    op = e.submit("pan", lease["lease_id"], "agent", target={"shoulder_pan": e.measured["shoulder_pan"] + 1})
+    assert op["target"]["gripper"] == e.commanded["gripper"]
+
+
+def test_servo_temperatures_are_sampled_rarely_and_never_fault_control(rig):
+    e, c = rig
+    advance(e, c, 1.1)
+    assert e.observe()["temperatures"] == dict.fromkeys(e.measured, 25)
+
+    def broken():
+        raise RuntimeError("bus busy")
+
+    e.driver.temperatures = broken
+    advance(e, c, 1.1)
+    assert e.fault is None
+    assert e.observe()["temperatures"] is None

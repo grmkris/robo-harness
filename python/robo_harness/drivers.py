@@ -22,6 +22,9 @@ class MockDriver:
     def write(self, values: dict[str, float]) -> None:
         self.q = values.copy()
 
+    def temperatures(self) -> dict[str, int]:
+        return dict.fromkeys(JOINTS, 25)
+
     def close(self) -> None:
         pass
 
@@ -159,6 +162,11 @@ class LeRobotDriver:
 
     def write(self, values: dict[str, float]) -> None:
         self.robot.send_action({f"{j}.pos": v for j, v in values.items()})
+
+    def temperatures(self) -> dict[str, int]:
+        """Servo temperatures in C; one sync read, so call it rarely."""
+        temps = self.robot.bus.sync_read("Present_Temperature", normalize=False)
+        return {j: int(temps[j]) for j in JOINTS}
 
     def close(self) -> None:
         self.robot.disconnect()

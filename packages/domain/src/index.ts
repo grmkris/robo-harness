@@ -56,6 +56,10 @@ export const Observation = Schema.Struct({
   calibration_id: Schema.String,
   measured: Pose,
   commanded: Pose,
+  // Servo temperatures in C, sampled about once a second; null when unread.
+  temperatures: Schema.optionalKey(
+    Schema.NullOr(Schema.Record(Schema.String, Schema.Int))
+  ),
   ee: Schema.Array(Schema.Finite),
   frames: Schema.Record(
     Schema.String,
