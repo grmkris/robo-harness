@@ -38,7 +38,24 @@ test("the footprint grows with height and is zero on the mat", () => {
 test("the shipped search raster tiles the mat it sweeps", () => {
   const coverage = rasterCoverage(config());
   expect(coverage.tiles).toBe(true);
-  expect(coverage.footprintM).toBeGreaterThan(coverage.worstStepM);
+  expect(coverage.footprintM).toBeGreaterThanOrEqual(coverage.requiredM);
+  // 0.208 m of footprint against a 0.05 m step: four times over, not marginal.
+  expect(coverage.footprintM / coverage.worstStepM).toBeGreaterThan(4);
+});
+
+test("a footprint that merely equals the step does not tile", () => {
+  // Zero overlap means a piece on the boundary shows each look a sliver, which
+  // is less than the detector needs to call anything visible.
+  const step = rasterCoverage(config()).worstStepM;
+  const exact = rasterCoverage(
+    config({ wristFootprintRatio: step / skillDefaults.scanHeightM })
+  );
+  expect(exact.footprintM).toBeCloseTo(step, 6);
+  expect(exact.tiles).toBe(false);
+  const overlapping = rasterCoverage(
+    config({ wristFootprintRatio: (step * 1.6) / skillDefaults.scanHeightM })
+  );
+  expect(overlapping.tiles).toBe(true);
 });
 
 test("both gap directions are measured, not just the radial one", () => {

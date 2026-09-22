@@ -182,6 +182,14 @@ export const heightAboveMat = (obs: Observation, config: SkillConfig) =>
 export const wristFootprintM = (config: SkillConfig, heightM: number) =>
   Math.max(0, heightM) * config.wristFootprintRatio;
 
+/**
+ * How much wider than its own worst step the footprint must be. Equality
+ * leaves zero overlap, and a piece straddling the boundary between two looks
+ * shows the detector a sliver at each -- below the pixels it needs to call
+ * anything visible. Overlap is what makes a three-arc raster a covering.
+ */
+const RASTER_OVERLAP = 1.5;
+
 export interface RasterCoverage {
   /** Mat the camera sees at scan height. */
   readonly footprintM: number;
@@ -191,6 +199,8 @@ export interface RasterCoverage {
   readonly angularStepM: number;
   /** Largest gap the raster leaves against the footprint. */
   readonly worstStepM: number;
+  /** Footprint the worst step demands, overlap included. */
+  readonly requiredM: number;
   readonly tiles: boolean;
 }
 
@@ -210,12 +220,14 @@ export const rasterCoverage = (config: SkillConfig): RasterCoverage => {
   const perLookDeg = 2 * config.moveCapDeg;
   const angularStepM = config.maxReachM * (perLookDeg * (Math.PI / 180));
   const worstStepM = Math.max(radialStepM, angularStepM);
+  const requiredM = worstStepM * RASTER_OVERLAP;
   return {
     footprintM,
     radialStepM,
     angularStepM,
     worstStepM,
-    tiles: footprintM > worstStepM,
+    requiredM,
+    tiles: footprintM >= requiredM,
   };
 };
 
@@ -534,7 +546,8 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
     return result(
       "scan_for_piece",
       "vetoed",
-      `search raster leaves gaps: steps ${round(coverage.worstStepM)} m between looks ` +
+      `search raster leaves gaps: steps ${round(coverage.worstStepM)} m between looks, ` +
+        `which needs ${round(coverage.requiredM)} m of footprint, ` +
         `but the camera sees ${round(coverage.footprintM)} m at ${round(ctx.config.scanHeightM)} m`,
       0
     );
