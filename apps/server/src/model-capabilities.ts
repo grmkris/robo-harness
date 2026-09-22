@@ -40,11 +40,16 @@ export const modelCapabilities = (
   const xaiVendor = host === "api.x.ai";
   const alibaba = provider === "alibaba" && (gateway || alibabaVendor);
   const xai = provider === "xai" && (gateway || xaiVendor);
+  // The generic `cliproxy` provider names models by the gateway's aliases, so
+  // it inherits whatever the vendor tables know about the same name -- and
+  // only through a gateway-shaped URL.
+  const cliproxy = provider === "cliproxy" && gateway;
   // grok-4.7 (2026-09-21) and grok-4.6 document image input
   const xaiVision = new Set(["grok-4.7", "grok-4.6"]);
   const known =
-    (alibaba && (alibabaVision.has(model) || alibabaText.has(model))) ||
-    (xai && xaiVision.has(model));
+    ((alibaba || cliproxy) &&
+      (alibabaVision.has(model) || alibabaText.has(model))) ||
+    ((xai || cliproxy) && xaiVision.has(model));
   const atVendor =
     (provider === "alibaba" && alibabaVendor) ||
     (provider === "xai" && xaiVendor);
@@ -54,10 +59,15 @@ export const modelCapabilities = (
     image_input:
       !options.disableVision &&
       (configured ||
-        (alibaba && alibabaVision.has(model)) ||
-        (xai && xaiVision.has(model))),
+        ((alibaba || cliproxy) && alibabaVision.has(model)) ||
+        ((xai || cliproxy) && xaiVision.has(model))),
     tool_calling: true,
     strict_tools: false,
+    // Whether the request carries `parallel_tool_calls: false`. The generic
+    // gateway provider never sends it: some of the upstreams it fronts reject
+    // the field, and the chat tools already refuse a second mutating call in
+    // one response (MOTION_BUSY), so the wire flag is not what keeps motion
+    // sequential.
     parallel_control: provider === "alibaba" || xai,
     source:
       configured || options.disableVision

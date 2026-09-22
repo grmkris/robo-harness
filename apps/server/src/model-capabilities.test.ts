@@ -97,3 +97,29 @@ test("an unrelated host inherits nothing, whatever the model", () => {
       .image_input
   ).toBe(false);
 });
+
+test("the generic cliproxy provider inherits known vision through a gateway only", () => {
+  const gateway = "http://127.0.0.1:8317/v1";
+  expect(modelCapabilities("cliproxy", gateway, "grok-4.7")).toMatchObject({
+    image_input: true,
+    source: "gateway",
+    parallel_control: false,
+  });
+  expect(
+    modelCapabilities("cliproxy", gateway, "qwen3.8-max").image_input
+  ).toBe(true);
+  // An alias no vendor table knows stays text-only until configured.
+  expect(modelCapabilities("cliproxy", gateway, "gpt-6-astra")).toMatchObject({
+    image_input: false,
+    source: "unverified",
+  });
+  expect(
+    modelCapabilities("cliproxy", gateway, "gpt-6-astra", {
+      visionModels: ["gpt-6-astra"],
+    })
+  ).toMatchObject({ image_input: true, source: "configured" });
+  expect(
+    modelCapabilities("cliproxy", "https://api.example.invalid/v1", "grok-4.7")
+      .image_input
+  ).toBe(false);
+});

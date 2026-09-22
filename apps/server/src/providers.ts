@@ -17,6 +17,15 @@ const xaiUrl = () => process.env["ROBO_XAI_URL"] ?? xaiDefault;
 // accept it as well as the OpenAI-compatible DASHSCOPE_API_KEY name.
 const alibabaKey = () =>
   process.env["DASHSCOPE_API_KEY"] ?? process.env["ALIBABA_TOKEN_PLAN_API_KEY"];
+// The generic gateway provider: any OpenAI-compatible model the local
+// cliproxy serves, named by its alias. It exists so a benchmark can run every
+// model through the same chat loop with only the model varying. The key falls
+// back to XAI_API_KEY because the live coordinator already routes xAI through
+// cliproxy with the robo key there.
+const cliproxyDefault = "http://127.0.0.1:8317/v1";
+const cliproxyUrl = () => process.env["ROBO_CLIPROXY_URL"] ?? cliproxyDefault;
+const cliproxyKey = () =>
+  process.env["ROBO_CLIPROXY_KEY"] || process.env["XAI_API_KEY"] || undefined;
 async function xaiToken() {
   if (process.env["XAI_API_KEY"]) {
     return process.env["XAI_API_KEY"];
@@ -57,12 +66,13 @@ async function xaiToken() {
 // A provider's selectable models: the default first, plus any extras from a
 // comma-separated `ROBO_<PROVIDER>_MODELS` env, de-duplicated. Keeping the list
 // env-driven means only models the account can actually serve are offered.
-function modelList(defaultModel: string, extrasEnv: string): string[] {
-  const extras = (process.env[extrasEnv] ?? "")
+const envList = (name: string): string[] =>
+  (process.env[name] ?? "")
     .split(",")
     .map((m) => m.trim())
     .filter(Boolean);
-  return [...new Set([defaultModel, ...extras])];
+function modelList(defaultModel: string, extrasEnv: string): string[] {
+  return [...new Set([defaultModel, ...envList(extrasEnv)])];
 }
 export async function catalog(): Promise<ProviderInfo[]> {
   const xai = Boolean(await xaiToken());
@@ -99,6 +109,15 @@ export async function catalog(): Promise<ProviderInfo[]> {
     alibabaModels
   );
   const xaiCapabilities = capabilityList("xai", xaiUrl(), xaiModels);
+  // No default: the gateway serves whatever its config aliases, so only the
+  // models the operator lists are offered.
+  const cliproxyModels = [...new Set(envList("ROBO_CLIPROXY_MODELS"))];
+  const cliproxyCapabilities = capabilityList(
+    "cliproxy",
+    cliproxyUrl(),
+    cliproxyModels
+  );
+  const cliproxyReady = Boolean(cliproxyKey()) && cliproxyModels.length > 0;
   return [
     {
       id: "alibaba",
@@ -124,6 +143,21 @@ export async function catalog(): Promise<ProviderInfo[]> {
         ? {}
         : {
             reason: "Configure XAI_API_KEY or an explicit fresh Grok auth file",
+          }),
+    },
+    {
+      id: "cliproxy",
+      name: "cliproxy gateway",
+      available: cliproxyReady,
+      model: cliproxyModels[0] ?? "",
+      models: cliproxyModels,
+      vision: cliproxyCapabilities[0]?.image_input ?? false,
+      capabilities: cliproxyCapabilities,
+      ...(cliproxyReady
+        ? {}
+        : {
+            reason:
+              "Set ROBO_CLIPROXY_MODELS and ROBO_CLIPROXY_KEY (or XAI_API_KEY)",
           }),
     },
     {
@@ -159,14 +193,20 @@ export async function resolveModel(provider: string, model?: string) {
     throw new ApiError(`Model ${model} is not available for ${provider}`, 422);
   }
   const chosen = model ?? info.model;
-  const key = alibabaKey();
   const client = new OpenAI({
     baseURL:
       provider === "alibaba"
         ? (process.env["ROBO_ALIBABA_URL"] ?? alibaba)
-        : xaiUrl(),
+        : provider === "cliproxy"
+          ? cliproxyUrl()
+          : xaiUrl(),
     maxRetries: 0,
-    apiKey: provider === "alibaba" ? (key ?? "") : "per-request-token",
+    apiKey:
+      provider === "alibaba"
+        ? (alibabaKey() ?? "")
+        : provider === "cliproxy"
+          ? (cliproxyKey() ?? "")
+          : "per-request-token",
     ...(provider === "xai"
       ? {
           fetch: Object.assign(
