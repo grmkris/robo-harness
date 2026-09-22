@@ -58,6 +58,22 @@ test("a footprint that merely equals the step does not tile", () => {
   expect(overlapping.tiles).toBe(true);
 });
 
+test("the angular step follows the sweep's look cadence", () => {
+  // The cadence lives in one place: if the sweep started looking every third
+  // move, the coverage arithmetic has to widen with it rather than keep
+  // vouching for a raster that had stopped looking that often.
+  const coverage = rasterCoverage(config());
+  const perLook = coverage.angularStepM / skillDefaults.moveCapDeg;
+  const wider = rasterCoverage(
+    config({ moveCapDeg: skillDefaults.moveCapDeg * 2 })
+  );
+  expect(wider.angularStepM / (skillDefaults.moveCapDeg * 2)).toBeCloseTo(
+    perLook,
+    9
+  );
+  expect(wider.angularStepM).toBeCloseTo(coverage.angularStepM * 2, 9);
+});
+
 test("both gap directions are measured, not just the radial one", () => {
   const coverage = rasterCoverage(config());
   // Arcs are 5 cm apart.

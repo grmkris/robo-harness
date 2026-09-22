@@ -190,6 +190,15 @@ export const wristFootprintM = (config: SkillConfig, heightM: number) =>
  */
 const RASTER_OVERLAP = 1.5;
 
+/**
+ * Moves the sweep makes between two looks. Looking after every move overloads
+ * the Pi; looking too rarely leaves unseen mat between looks. Both the sweep
+ * and the coverage arithmetic read this, because a cadence that lived in two
+ * places would let the coverage check keep saying "tiles" about a sweep that
+ * had stopped looking that often.
+ */
+const SCAN_LOOKS_EVERY_MOVES = 2;
+
 export interface RasterCoverage {
   /** Mat the camera sees at scan height. */
   readonly footprintM: number;
@@ -216,8 +225,9 @@ export interface RasterCoverage {
 export const rasterCoverage = (config: SkillConfig): RasterCoverage => {
   const footprintM = wristFootprintM(config, config.scanHeightM);
   const radialStepM = Math.abs(config.scanReachStepM);
-  // The scan looks every second move, and each move is capped at moveCapDeg.
-  const perLookDeg = 2 * config.moveCapDeg;
+  // Each move is capped at moveCapDeg, and the sweep looks every
+  // SCAN_LOOKS_EVERY_MOVES of them.
+  const perLookDeg = SCAN_LOOKS_EVERY_MOVES * config.moveCapDeg;
   const angularStepM = config.maxReachM * (perLookDeg * (Math.PI / 180));
   const worstStepM = Math.max(radialStepM, angularStepM);
   const requiredM = worstStepM * RASTER_OVERLAP;
@@ -651,9 +661,10 @@ const runScan = async (ctx: SkillContext): Promise<SkillResult> => {
     for (let i = 0; i < 80; i += 1) {
       const step = await stepToward(ctx, obs, { shoulder_pan: goalPan });
       obs = step.obs;
-      // Looking after every move overloads the Pi, and two moves pan about
-      // 3 degrees -- far less than the camera's footprint.
-      if ((i % 2 === 1 || step.reached) && (await check())) {
+      // Looking after every move overloads the Pi; rasterCoverage checks this
+      // cadence against the camera's footprint before the sweep starts.
+      const due = (i + 1) % SCAN_LOOKS_EVERY_MOVES === 0;
+      if ((due || step.reached) && (await check())) {
         return result(
           "scan_for_piece",
           "done",
