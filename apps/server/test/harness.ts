@@ -159,6 +159,10 @@ export async function startHarness(
       ...(fixture
         ? {
             ROBO_ALIBABA_URL: `http://127.0.0.1:${fixture.port}`,
+            // The generic gateway provider, served by the same fixture.
+            ROBO_CLIPROXY_URL: `http://127.0.0.1:${fixture.port}`,
+            ROBO_CLIPROXY_KEY: "fixture-key-not-real",
+            ROBO_CLIPROXY_MODELS: "fixture-gateway",
             ROBO_PERCEPTION_URL: `http://127.0.0.1:${fixture.port}`,
           }
         : {}),

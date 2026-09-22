@@ -6,6 +6,7 @@ import { decodeHistory, encodeHistory } from "./chat-history";
 import { saveChatImage } from "./chat-images";
 import { createChatTools } from "./chat-tools";
 import { agentControlSignal } from "./control-lifecycle";
+import { STREAM_STALL } from "./limits";
 import { runChatLoop } from "./loop";
 import { activeDecisionRuns } from "./motion-executor";
 import { resolveModel } from "./providers";
@@ -105,11 +106,21 @@ function frameMessage(frame: Frame): ModelMessage {
     ],
   };
 }
+/** Per-run overrides a benchmark needs; every field absent means the product
+ *  defaults (STEP_CAP, STREAM_STALL, the built-in instructions alone). */
+export interface ChatRunOptions {
+  readonly stepCap?: number;
+  /** Stall bound for both the first chunk and every later chunk. */
+  readonly stallMs?: number;
+  /** Appended to the system instructions, e.g. a general skill document. */
+  readonly systemAppend?: string;
+}
 export async function startChat(
   provider: string,
   model: string | undefined,
   text: string,
-  id?: string
+  id?: string,
+  options: ChatRunOptions = {}
 ) {
   const sessionId = id ?? crypto.randomUUID();
   // Reserve the session synchronously, before any await, so two concurrent
@@ -136,6 +147,7 @@ export async function startChat(
       .query("UPDATE conversations SET messages=? WHERE id=?")
       .run(encodeHistory(messages), sessionId);
   let opening: ModelMessage[];
+  let eventId = 0;
   let resolved: Awaited<ReturnType<typeof resolveModel>>;
   try {
     resolved = await resolveModel(provider, model);
@@ -154,13 +166,18 @@ export async function startChat(
     ).run(sessionId, provider, resolved.info.model, Date.now());
     opening = [...history(sessionId), { role: "user" as const, content: text }];
     persist(opening);
-    emit("chat.message", { session_id: sessionId, role: "user", text });
+    eventId = emit("chat.message", {
+      session_id: sessionId,
+      role: "user",
+      text,
+    }).id;
   } catch (error) {
     sessions.delete(sessionId);
     settled.resolve(null);
     throw error;
   }
   const runId = crypto.randomUUID();
+  const stallMs = options.stallMs ?? STREAM_STALL.firstChunkMs;
   const started = performance.now();
   const callStarted = new Map<string, number>();
   let stepNumber = 0;
@@ -206,8 +223,13 @@ export async function startChat(
       });
       const stream = runChatLoop({
         model: resolved.model,
-        instructions: `${instructions}\nSelected model image input: ${resolved.info.vision ? "enabled" : "unavailable; captures provide metadata only"}.`,
+        instructions: `${instructions}\nSelected model image input: ${resolved.info.vision ? "enabled" : "unavailable; captures provide metadata only"}.${options.systemAppend ? `\n\n${options.systemAppend}` : ""}`,
         modelOptions: resolved.modelOptions,
+        stepCap: options.stepCap,
+        stall:
+          options.stallMs === undefined
+            ? undefined
+            : { firstChunkMs: options.stallMs, chunkMs: options.stallMs },
         tools: agent.tools,
         prepareTools: agent.prepare,
         abortSignal: signal,
@@ -326,7 +348,7 @@ export async function startChat(
         message: signal.aborted
           ? describeToolError(signal.reason).message
           : failureCode === "PROVIDER_TIMEOUT"
-            ? "Model timed out after 90 seconds without streamed activity. The turn ended; review any motion result before continuing."
+            ? `Model timed out after ${String(Math.round(stallMs / 1000))} seconds without streamed activity. The turn ended; review any motion result before continuing.`
             : "Model request failed. The turn ended; review any motion result before continuing.",
       });
     } finally {
@@ -345,7 +367,9 @@ export async function startChat(
       });
     }
   })().finally(() => settled.resolve(null));
-  return { session_id: sessionId };
+  // event_id lets a headless client follow /api/events from this run's first
+  // event; run_id is the one chat.finished carries.
+  return { session_id: sessionId, run_id: runId, event_id: eventId };
 }
 
 /** Server shutdown waits for stream and action finalizers before closing SQLite. */

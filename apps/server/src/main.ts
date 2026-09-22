@@ -437,6 +437,25 @@ async function handle(req: Request): Promise<Response | undefined> {
             Schema.isMaxLength(24_000)
           ),
           session_id: Schema.optionalKey(Uuid),
+          // Benchmark-only run options; absent means the product defaults.
+          step_cap: Schema.optionalKey(
+            Schema.Int.check(
+              Schema.isGreaterThanOrEqualTo(1),
+              Schema.isLessThanOrEqualTo(200)
+            )
+          ),
+          stall_ms: Schema.optionalKey(
+            Schema.Int.check(
+              Schema.isGreaterThanOrEqualTo(5000),
+              Schema.isLessThanOrEqualTo(600_000)
+            )
+          ),
+          system_append: Schema.optionalKey(
+            Schema.String.check(
+              Schema.isMinLength(1),
+              Schema.isMaxLength(32_000)
+            )
+          ),
         }),
         await parse(req)
       );
@@ -445,7 +464,14 @@ async function handle(req: Request): Promise<Response | undefined> {
           body.provider,
           body.model,
           body.text,
-          body.session_id
+          body.session_id,
+          {
+            ...(body.step_cap === undefined ? {} : { stepCap: body.step_cap }),
+            ...(body.stall_ms === undefined ? {} : { stallMs: body.stall_ms }),
+            ...(body.system_append === undefined
+              ? {}
+              : { systemAppend: body.system_append }),
+          }
         )
       );
     }

@@ -463,3 +463,68 @@ test("assistant explanations precede their tool call and result without duplicat
     await h.close();
   }
 }, 15_000);
+
+test("a bench run through the gateway provider takes its own step cap and skill text", async () => {
+  const h = await startHarness({
+    modelSteps: [move(), move(), { text: "Stopped at the cap." }],
+  });
+  try {
+    const response = await h.request("/api/chat", {
+      provider: "cliproxy",
+      model: "fixture-gateway",
+      text: "Move the gripper slightly and report measured completion.",
+      step_cap: 2,
+      stall_ms: 20_000,
+      system_append: "BENCH-SKILL-DOC: observe before acting.",
+    });
+    expect(response.status).toBe(200);
+    const started = (await response.json()) as {
+      session_id: string;
+      run_id: string;
+      event_id: number;
+    };
+    expect(started.event_id).toBeGreaterThan(0);
+    const result = await transcript(h, started.session_id);
+    // Step 2 of 2 is the tools-disabled summary.
+    expect(h.requests).toHaveLength(2);
+    expect(JSON.stringify(h.requests[0]?.["messages"])).toContain(
+      "BENCH-SKILL-DOC: observe before acting."
+    );
+    expect(JSON.stringify(h.requests[0]?.["messages"])).toContain("step 1/2");
+    expect(h.requests[1]?.["tool_choice"]).toBe("none");
+    // The gateway provider never sends the flag some upstreams reject.
+    expect(h.requests[0]).not.toHaveProperty("parallel_tool_calls");
+    const finished = result.events.find(
+      (event) => event.type === "chat.finished"
+    )?.data;
+    expect(finished).toMatchObject({
+      run_id: started.run_id,
+      steps: 2,
+      usage: { input_tokens: 20, output_tokens: 20, calls: 2 },
+    });
+  } finally {
+    await h.close();
+  }
+}, 20_000);
+
+test("bench run options are bounded and strictly validated", async () => {
+  const h = await startHarness({ withIo: false });
+  try {
+    const body = { provider: "cliproxy", text: "hi" };
+    for (const extra of [
+      { step_cap: 0 },
+      { step_cap: 201 },
+      { step_cap: 2.5 },
+      { stall_ms: 100 },
+      { system_append: "" },
+      { system_append: "x".repeat(32_001) },
+      { unknown_option: true },
+    ]) {
+      expect((await h.request("/api/chat", { ...body, ...extra })).status).toBe(
+        400
+      );
+    }
+  } finally {
+    await h.close();
+  }
+}, 20_000);
