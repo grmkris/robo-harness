@@ -43,7 +43,7 @@ The iframe's internal timeline can be paused independently. The persistent label
 
 ## Providers
 
-Alibaba Token Plan uses its compatible API through our own loop. xAI uses an API key or an explicitly configured Grok auth file, reread for each request. The Grok CLI remains the sole owner of token refresh; this app will not rotate or copy its refresh token. On netcup both providers are pointed at the cliproxy gateway (`ROBO_ALIBABA_URL` / `ROBO_XAI_URL` = `http://127.0.0.1:8317/v1`, key `CLIPROXY_API_KEY_ROBO`); documented image support carries over to the gateway host.
+Alibaba Token Plan uses its compatible API through our own loop. xAI uses an API key or an explicitly configured Grok auth file, reread for each request. The Grok CLI remains the sole owner of token refresh; this app will not rotate or copy its refresh token. On netcup both providers are pointed at the cliproxy gateway (`ROBO_ALIBABA_URL` / `ROBO_XAI_URL` = `http://127.0.0.1:8317/v1`, key `CLIPROXY_API_KEY_ROBO`); image support carries over to the gateway host, reported as `source: "gateway"` rather than `"documented"` because which upstream an alias forwards to is the gateway's configuration, not something this app can see.
 
 Claude and Codex subscription adapters are visibly unavailable until their direct custom-loop route is verified. External Claude/Codex agents can use the MCP server now. There is no substitution of native agent runtimes for the custom loop.
 

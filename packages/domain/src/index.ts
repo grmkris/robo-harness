@@ -156,7 +156,19 @@ export const ModelCapabilities = Schema.Struct({
   tool_calling: Schema.Boolean,
   strict_tools: Schema.Boolean,
   parallel_control: Schema.Boolean,
-  source: Schema.Literals(["documented", "configured", "unverified"]),
+  /**
+   * Where the capability claim comes from. `documented`: the vendor documents
+   * it for this model at its own endpoint. `gateway`: the same model through a
+   * local proxy, inherited by assumption -- nothing checked what the proxy
+   * actually forwards to. `configured`: the operator asserted it.
+   * `unverified`: nobody has said.
+   */
+  source: Schema.Literals([
+    "documented",
+    "gateway",
+    "configured",
+    "unverified",
+  ]),
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 

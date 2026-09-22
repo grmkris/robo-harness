@@ -26,21 +26,28 @@ export const modelCapabilities = (
   } = {}
 ): ModelCapabilities => {
   const host = new URL(endpoint).hostname;
-  // The cliproxy gateway (loopback on netcup, *.ts.net on the tailnet) fronts the
-  // same upstream models, so documented image support carries over to it.
-  const gateway =
-    host === "127.0.0.1" || host === "localhost" || host.endsWith(".ts.net");
-  const alibaba =
-    provider === "alibaba" &&
-    (gateway ||
-      host.endsWith(".aliyuncs.com") ||
-      host.endsWith(".alibabacloud.com"));
-  const xai = provider === "xai" && (gateway || host === "api.x.ai");
-  // grok-4.7 (2026-09-21) and grok-4.6 document image input through the gateway
+  // URL.hostname keeps the brackets on an IPv6 literal.
+  const loopback = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+  // The cliproxy gateway (loopback on netcup, *.ts.net on the tailnet) fronts
+  // the same upstream models, so capability claims carry over to it -- but
+  // only by assumption. Which model a gateway alias forwards to is the
+  // gateway's config, not something this code can see, so support inherited
+  // this way is reported as `gateway` rather than `documented`: it is the
+  // shape of the URL talking, not the vendor.
+  const gateway = loopback.has(host) || host.endsWith(".ts.net");
+  const alibabaVendor =
+    host.endsWith(".aliyuncs.com") || host.endsWith(".alibabacloud.com");
+  const xaiVendor = host === "api.x.ai";
+  const alibaba = provider === "alibaba" && (gateway || alibabaVendor);
+  const xai = provider === "xai" && (gateway || xaiVendor);
+  // grok-4.7 (2026-09-21) and grok-4.6 document image input
   const xaiVision = new Set(["grok-4.7", "grok-4.6"]);
-  const documented =
+  const known =
     (alibaba && (alibabaVision.has(model) || alibabaText.has(model))) ||
     (xai && xaiVision.has(model));
+  const atVendor =
+    (provider === "alibaba" && alibabaVendor) ||
+    (provider === "xai" && xaiVendor);
   const configured = options.visionModels?.includes(model) ?? false;
   return {
     model,
@@ -55,8 +62,10 @@ export const modelCapabilities = (
     source:
       configured || options.disableVision
         ? "configured"
-        : documented
-          ? "documented"
+        : known
+          ? atVendor
+            ? "documented"
+            : "gateway"
           : "unverified",
   };
 };
