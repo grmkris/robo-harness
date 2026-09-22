@@ -1,0 +1,13 @@
+{
+  "tcp_offset_m": [0, 0, 0],
+  "home_pose": null,
+  "safe_zone": {
+    "polygon": null,
+    "max_radius_m": 0.17
+  },
+  "approach_height_m": 0.05,
+  "table_z_m": -0.054,
+  "table_clearance_m": 0.015,
+  "workspace_table_homography": null,
+  "wrist_grasp_point_px": null
+}
