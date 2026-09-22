@@ -25,7 +25,8 @@
     "graph": "bun tools/check-graph.ts",
     "hooks:install": "lefthook install",
     "jev": "bun apps/cli/src/jev.ts",
-    "chat": "bun apps/cli/src/chat.ts"
+    "chat": "bun apps/cli/src/chat.ts",
+    "probe-models": "bun apps/cli/src/probe-models.ts"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.2",
