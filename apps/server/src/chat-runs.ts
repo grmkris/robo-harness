@@ -170,6 +170,10 @@ export async function startChat(
   let firstCallId: string | undefined;
   let firstInputValid = true;
   let failureCode = "PROVIDER_ERROR";
+  // Token totals over every model call of this turn; cost only when the
+  // provider reported one for at least one call.
+  const usage = { input_tokens: 0, output_tokens: 0, calls: 0 };
+  let cost: number | undefined;
   void (async () => {
     try {
       const pendingImages: Frame[] = [];
@@ -296,6 +300,11 @@ export async function startChat(
                 ),
                 ...failure,
               });
+            } else if (part.type === "usage") {
+              usage.input_tokens += part.input_tokens;
+              usage.output_tokens += part.output_tokens;
+              usage.calls += 1;
+              if (part.cost !== undefined) cost = (cost ?? 0) + part.cost;
             } else if (part.type === "finish-step") {
               flushAssistant();
             }
@@ -332,6 +341,7 @@ export async function startChat(
         invalid_inputs: invalidInputs,
         completed_actions: completedActions,
         first_tool_input_valid: firstCallId ? firstInputValid : null,
+        usage: cost === undefined ? usage : { ...usage, cost },
       });
     }
   })().finally(() => settled.resolve(null));

@@ -308,6 +308,16 @@ export const runChatLoop = (opts: ChatLoopOptions) =>
                 })
               );
           },
+          // One call per model iteration that reports usage; the compatible
+          // adapter always asks for it (stream_options.include_usage).
+          onUsage: (_ctx, usage) => {
+            queue.push({
+              type: "usage",
+              input_tokens: usage.promptTokens,
+              output_tokens: usage.completionTokens,
+              ...(usage.cost === undefined ? {} : { cost: usage.cost }),
+            });
+          },
           onToolPhaseComplete: (_ctx, info) => {
             const content: { type: string; error?: unknown }[] = [];
             const results = info.results.map((result) => {

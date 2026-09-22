@@ -16,6 +16,14 @@ export type ChatEvent =
   | { type: "start-step" | "finish-step" }
   | { type: "text-delta"; text: string }
   | { type: "model-status"; status: "thinking" }
+  /** One model call's token usage, as the provider reported it. `cost` only
+   *  when the provider reports one (OpenRouter-style gateways). */
+  | {
+      type: "usage";
+      input_tokens: number;
+      output_tokens: number;
+      cost?: number;
+    }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | {
       type: "tool-result";

@@ -114,6 +114,12 @@ test("invalid strings are visible, and recovery with numeric input succeeds", as
       invalid_inputs: 1,
       completed_actions: 1,
       first_tool_input_valid: false,
+      // The fixture reports 10 prompt + 10 completion tokens per call.
+      usage: {
+        input_tokens: 10 * h.requests.length,
+        output_tokens: 10 * h.requests.length,
+        calls: h.requests.length,
+      },
     });
     await h.until(
       async () =>

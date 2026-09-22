@@ -473,3 +473,32 @@ test("Qwen reasoning-only chunks keep the stream alive until text arrives", asyn
     await server.stop(true);
   }
 });
+
+test("each model call's reported usage becomes one usage event", async () => {
+  const { model } = scriptedModel([
+    [
+      ...toolStep("ping", "u").slice(0, -1),
+      {
+        ...finished("tool_calls"),
+        usage: { promptTokens: 120, completionTokens: 30, totalTokens: 150 },
+      },
+    ],
+    [
+      ...textStep("done").slice(0, -1),
+      {
+        ...finished("stop"),
+        usage: {
+          promptTokens: 200,
+          completionTokens: 5,
+          totalTokens: 205,
+          cost: 0.002,
+        },
+      },
+    ],
+  ]);
+  const events = await drain(base(model));
+  expect(events.filter((part) => part.type === "usage")).toEqual([
+    { type: "usage", input_tokens: 120, output_tokens: 30 },
+    { type: "usage", input_tokens: 200, output_tokens: 5, cost: 0.002 },
+  ]);
+});
