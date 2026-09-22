@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
-from scipy import ndimage
+from scipy import ndimage, spatial
 
 SCALE = 2  # analyse at 320x240; pixels are reported at full resolution
 DIFF_THRESHOLD = 40
@@ -37,6 +37,14 @@ MIN_SPAN_M = 0.15
 MIN_MINOR_SPAN_M = 0.03
 # Two points define a direction but no spread, so a shorter set has no extent to measure.
 MIN_SPREAD_POINTS = 2
+# A homography is only measured where points were seen. Off that region it
+# extrapolates, and an arc sweep is thin: on 2026-09-18 a fit whose residuals
+# were 5.5 mm on its own inliers placed the piece at r = 0.166 m while two
+# photographs put the mat's near edge past 0.22 m. A position this far outside
+# the swept region is reported, never used.
+MAX_EXTRAPOLATION_PX = 12.0
+# A hull needs three points; fewer describes no region to be inside of.
+MIN_HULL_POINTS = 3
 MIN_INLIER_FRACTION = 0.6
 MAX_P90_M = 0.010
 RANSAC_ROUNDS = 3000
@@ -96,6 +104,30 @@ def coverage_spread(points: np.ndarray) -> tuple[float, float]:
     _, _, basis = np.linalg.svd(centred, full_matrices=False)
     projected = centred @ basis.T
     return float(np.ptp(projected[:, 0])), float(np.ptp(projected[:, 1]))
+
+
+def outside_hull_px(hull_points: np.ndarray, point: np.ndarray) -> float | None:
+    """How far `point` lies outside the convex hull of `hull_points`, in pixels.
+
+    Zero means inside. None means the question cannot be asked -- too few
+    points, or points so nearly collinear that they enclose no area.
+
+    The check is done in pixels, on the region the arm was actually seen in,
+    because that is where the homography was measured. Everywhere else it
+    extrapolates, and the thin band an arc sweep covers extrapolates badly a
+    few centimetres off it.
+    """
+    if len(hull_points) < MIN_HULL_POINTS:
+        return None
+    try:
+        hull = spatial.ConvexHull(hull_points)
+    except spatial.QhullError:
+        return None
+    # Each facet is A.x + b <= 0 inside; the largest positive value is the
+    # distance to the nearest face of the hull, in pixel units.
+    equations = hull.equations
+    signed = equations[:, :-1] @ point + equations[:, -1]
+    return float(max(0.0, signed.max()))
 
 
 def apply(h: np.ndarray, points: np.ndarray) -> np.ndarray:
@@ -247,7 +279,17 @@ def main() -> None:
         "spread_minor": fit["spread_minor_m"] >= MIN_MINOR_SPAN_M,
     }
     piece = find_piece(background)
-    piece_xy = apply(h, np.array([[piece["x"], piece["y"]]]))[0].tolist() if piece else None
+    # The piece is generally not on the swept arc, so its position is only
+    # trustworthy if it falls inside the region the fit was measured in.
+    outside_px = (
+        outside_hull_px(pixels_a[inliers], np.array([piece["x"], piece["y"]]))
+        if piece and inliers.any()
+        else None
+    )
+    extrapolated = outside_px is None or outside_px > MAX_EXTRAPOLATION_PX
+    piece_xy = (
+        apply(h, np.array([[piece["x"], piece["y"]]]))[0].tolist() if piece and not extrapolated else None
+    )
     report = {
         "recording": recording.name,
         "camera": "workspace",
@@ -258,8 +300,19 @@ def main() -> None:
         "accepted": all(bars.values()),
         "piece_pixel": piece,
         "piece_xy_m": [round(v, 3) for v in piece_xy] if piece_xy else None,
+        # Why there is no position, when there is a piece but no coordinates.
+        "piece_outside_sweep_px": (None if outside_px is None else round(outside_px, 1)),
+        "piece_extrapolated": bool(piece) and extrapolated,
     }
     print(json.dumps({k: v for k, v in report.items() if k != "pixel_to_metres"}, indent=2))
+    if piece and extrapolated:
+        where = "no region to test against" if outside_px is None else f"{outside_px:.0f} px outside it"
+        print(
+            f"piece found at ({piece['x']:.0f}, {piece['y']:.0f}) but not positioned: "
+            f"the fit was measured over the swept arc and the piece is {where}. "
+            "Sweep over the piece, or move it into the swept region.",
+            file=sys.stderr,
+        )
     if report["accepted"] or args.force:
         Path(args.out).write_text(json.dumps(report, indent=2) + "\n")
         print(f"written {args.out}", file=sys.stderr)
