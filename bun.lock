@@ -22,6 +22,7 @@
       "name": "@robo/cli",
       "dependencies": {
         "@robo/protocol": "workspace:*",
+        "effect": "4.0.0-rc.112",
       },
     },
     "apps/server": {
