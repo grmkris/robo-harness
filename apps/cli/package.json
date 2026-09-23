@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@robo/domain": "workspace:*",
     "@robo/protocol": "workspace:*",
     "effect": "4.0.0-rc.112"
   }

@@ -49,8 +49,8 @@ export const nodes: readonly Node[] = [
     dir: "apps/cli",
     name: "@robo/cli",
     layer: "app",
-    role: "Operator CLI, MCP server, and real-arm smoke.",
-    mayImport: ["@robo/protocol"],
+    role: "Operator CLI, MCP server, benchmark evidence and real-arm smoke.",
+    mayImport: ["@robo/protocol", "@robo/domain"],
   },
   {
     dir: "apps/web",
