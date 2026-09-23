@@ -6,6 +6,14 @@ The general chat tools and SO-101 skills are shared by all models. Task-specific
 
 A live trial runner is not wired up yet. The fixture reset loop (`apps/server/src/bench-reset.ts`) is implemented and tested, but its adapter is not connected to live hardware. It reobserves an unknown position and pauses after three failed attempts. The physical admission gates remain a measured TCP/home/safe polygon, a held-out homography error within about 1 cm, three reset pick-and-places and one watched trial per model. Offline tests do not satisfy those gates. The reset adapter must use the shared supervised executor, stop on the first unknown/failed motion, and independently verify contact, lift and final placement before another attempt.
 
+## Offline orchestration
+
+`apps/cli/src/bench-runner.ts` exercises the trial lifecycle through injected fixture adapters: home, before capture, bounded chat, after capture, judge, verified reset when placement exceeds 3 cm, then home. It has no CLI entrypoint or installed network/motion adapter. Every manifest is labelled `offline_fixture` with `physical_admission: false`, and every result reports zero scored trials.
+
+The fixture reserves a new run directory, snapshots config/schedule/caps, and writes per-phase results plus an event journal. Existing output refuses before adapter calls. It requires a new terminal run/session for each model trial, known motion outcomes, fresh frame identities, and a conclusive judge; uncertain results pause without resetting or starting another trial. Fault/camera/temperature/STOP checks run between phases and during pending work. Wall-clock expiry and three consecutive tool errors propagate cancellation. Adapters must obey that signal and settle all work before returning; these synthetic tests do not establish real coordinator cancellation or physical safety.
+
+Automatic recovery, cooling/resumption, live transcript/action-ledger export, SAM/VLM verification, and live reset/chat adapters still need integration after commissioning. A parked-arm observation or passing fixture must never be used as a smoke attestation.
+
 ## Read-only evidence capture
 
 Set `ROBO_URL` to the coordinator and, in token mode, `ROBO_TOKEN` to the operator credential. The CLI holds no motor or provider credential.
