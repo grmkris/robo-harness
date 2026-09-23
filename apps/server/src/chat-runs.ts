@@ -121,6 +121,8 @@ function frameMessage(frame: Frame): ModelMessage {
  *  defaults (STEP_CAP, STREAM_STALL, the built-in instructions alone). */
 export interface ChatRunOptions {
   readonly stepCap?: number;
+  /** Wall-clock bound, enforced even if the client disappears. */
+  readonly wallMs?: number;
   /** Stall bound for both the first chunk and every later chunk. */
   readonly stallMs?: number;
   /** Appended to the system instructions, e.g. a general skill document. */
@@ -150,6 +152,14 @@ export async function startChat(
     done: settled.promise,
   };
   sessions.set(sessionId, state);
+  let wallExpired = false;
+  const wallTimer =
+    options.wallMs === undefined
+      ? null
+      : setTimeout(() => {
+          wallExpired = true;
+          state.abort.abort(new Error("Chat wall-clock limit reached"));
+        }, options.wallMs);
   const controlSignal = agentControlSignal();
   const signal = AbortSignal.any([state.abort.signal, controlSignal]);
   const owner = `chat-${sessionId}`;
@@ -183,6 +193,7 @@ export async function startChat(
       text,
     }).id;
   } catch (error) {
+    if (wallTimer !== null) clearTimeout(wallTimer);
     sessions.delete(sessionId);
     settled.resolve(null);
     throw error;
@@ -355,14 +366,21 @@ export async function startChat(
       // event log.
       emit("chat.error", {
         session_id: sessionId,
-        code: signal.aborted ? "CANCELLED" : failureCode,
-        message: signal.aborted
-          ? describeToolError(signal.reason).message
-          : failureCode === "PROVIDER_TIMEOUT"
-            ? `Model timed out after ${String(Math.round(stallMs / 1000))} seconds without streamed activity. The turn ended; review any motion result before continuing.`
-            : "Model request failed. The turn ended; review any motion result before continuing.",
+        code: wallExpired
+          ? "WALL_TIME_LIMIT"
+          : signal.aborted
+            ? "CANCELLED"
+            : failureCode,
+        message: wallExpired
+          ? "The chat wall-clock limit elapsed; the turn was stopped. Review the measured motion outcome before continuing."
+          : signal.aborted
+            ? describeToolError(signal.reason).message
+            : failureCode === "PROVIDER_TIMEOUT"
+              ? `Model timed out after ${String(Math.round(stallMs / 1000))} seconds without streamed activity. The turn ended; review any motion result before continuing.`
+              : "Model request failed. The turn ended; review any motion result before continuing.",
       });
     } finally {
+      if (wallTimer !== null) clearTimeout(wallTimer);
       await release(owner).catch(() => {});
       sessions.delete(sessionId);
       emit("chat.finished", {

@@ -3,7 +3,7 @@
  * Headless chat turn: the coordinator's own agent loop, driven from a shell.
  *
  *   bun run chat --provider cliproxy --model <id> --text "..."
- *     [--step-cap N] [--stall-ms N] [--system-file path] [--session uuid] [--quiet]
+ *     [--step-cap N] [--stall-ms N] [--wall-ms N] [--system-file path] [--session uuid] [--quiet]
  *
  * Prints progress to stderr and ONE JSON line to stdout: chat.finished's
  * payload (duration_ms, steps, tool_calls, invalid_inputs, completed_actions,
@@ -34,6 +34,7 @@ const { values: args } = parseArgs({
     text: { type: "string" },
     "step-cap": { type: "string" },
     "stall-ms": { type: "string" },
+    "wall-ms": { type: "string" },
     "system-file": { type: "string" },
     session: { type: "string" },
     quiet: { type: "boolean" },
@@ -42,7 +43,7 @@ const { values: args } = parseArgs({
   strict: true,
 });
 
-const integer = (name: "step-cap" | "stall-ms") => {
+const integer = (name: "step-cap" | "stall-ms" | "wall-ms") => {
   const raw = args[name];
   if (raw === undefined) return null;
   const value = Number(raw);
@@ -94,6 +95,7 @@ const main = async () => {
   process.once("SIGTERM", onSignal);
   const stepCap = integer("step-cap");
   const stallMs = integer("stall-ms");
+  const wallMs = integer("wall-ms");
   const systemAppend = args["system-file"]
     ? await Bun.file(args["system-file"]).text()
     : undefined;
@@ -105,6 +107,7 @@ const main = async () => {
     ...(args.session === undefined ? {} : { sessionId: args.session }),
     ...(stepCap === null ? {} : { stepCap }),
     ...(stallMs === null ? {} : { stallMs }),
+    ...(wallMs === null ? {} : { wallMs }),
     ...(systemAppend === undefined ? {} : { systemAppend }),
     onEvent: (event) => {
       if (args.quiet) return;

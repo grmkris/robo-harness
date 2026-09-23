@@ -528,3 +528,48 @@ test("bench run options are bounded and strictly validated", async () => {
     await h.close();
   }
 }, 20_000);
+
+test("wall-clock cap cancels a live action and releases ownership without a client cancel", async () => {
+  const h = await startHarness({
+    modelSteps: [move(5), move(), { text: "must not run" }],
+  });
+  try {
+    const response = await h.request("/api/chat", {
+      provider: "alibaba",
+      model: "fixture",
+      text: "Move and report.",
+      wall_ms: 1500,
+    });
+    expect(response.status).toBe(200);
+    const started = await response.json();
+    await h.until(
+      async () => (await h.status()).observation.operation?.status === "running"
+    );
+    const result = await transcript(h, started.session_id);
+    await h.until(async () => (await h.status()).observation.operator === null);
+    expect((await h.status()).observation.operation.status).toBe("cancelled");
+    expect(
+      result.events.find((event) => event.type === "chat.error")?.data["code"]
+    ).toBe("WALL_TIME_LIMIT");
+    expect(h.requests).toHaveLength(1);
+  } finally {
+    await h.close();
+  }
+}, 15_000);
+
+test("wall-clock cap rejects unbounded or malformed values before model work", async () => {
+  const h = await startHarness();
+  try {
+    for (const wallMs of [0, 999, 1_800_001, "1000"]) {
+      const response = await h.request("/api/chat", {
+        provider: "alibaba",
+        text: "Observe.",
+        wall_ms: wallMs,
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(h.requests).toHaveLength(0);
+  } finally {
+    await h.close();
+  }
+}, 15_000);

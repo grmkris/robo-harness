@@ -444,6 +444,11 @@ async function handle(req: Request): Promise<Response | undefined> {
               Schema.isLessThanOrEqualTo(200)
             )
           ),
+          wall_ms: Schema.optionalKey(
+            Schema.Int.check(
+              Schema.isBetween({ minimum: 1000, maximum: 1_800_000 })
+            )
+          ),
           stall_ms: Schema.optionalKey(
             Schema.Int.check(
               Schema.isGreaterThanOrEqualTo(5000),
@@ -468,6 +473,7 @@ async function handle(req: Request): Promise<Response | undefined> {
           {
             ...(body.step_cap === undefined ? {} : { stepCap: body.step_cap }),
             ...(body.stall_ms === undefined ? {} : { stallMs: body.stall_ms }),
+            ...(body.wall_ms === undefined ? {} : { wallMs: body.wall_ms }),
             ...(body.system_append === undefined
               ? {}
               : { systemAppend: body.system_append }),

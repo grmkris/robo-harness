@@ -10,7 +10,7 @@ afterEach(async () => {
 
 /** A coordinator stand-in: accepts one chat, then streams scripted events
  *  (an unrelated session's first) and records every request it saw. */
-const coordinator = (finishOnCancel = false) => {
+const coordinator = (finishOnCancel = false, neverFinish = false) => {
   const seen: { path: string; auth: string | null; body: unknown }[] = [];
   const events: { id: number; type: string; data: Record<string, unknown> }[] =
     [
@@ -94,7 +94,8 @@ const coordinator = (finishOnCancel = false) => {
             });
           }
           const last = script.at(-1);
-          if (last) send(last);
+          if (last && !neverFinish)
+            send(finishOnCancel ? { ...last, id: 47 } : last);
         },
       });
       return new Response(body, {
@@ -163,6 +164,52 @@ test("aborting cancels the turn on the coordinator and still returns its summary
       code: "CANCELLED",
       message: "Operator stopped this run.",
     });
+  } finally {
+    Reflect.deleteProperty(process.env, "ROBO_TOKEN_FILE");
+  }
+});
+
+test("a pre-aborted client never starts a turn", async () => {
+  const { base, seen } = coordinator();
+  const abort = new AbortController();
+  abort.abort(new Error("already stopped"));
+  await Promise.resolve(
+    expect(
+      runChat({
+        baseUrl: base,
+        provider: "cliproxy",
+        text: "go",
+        signal: abort.signal,
+      })
+    ).rejects.toThrow("already stopped")
+  );
+  expect(seen).toHaveLength(0);
+});
+
+test("cancellation drain is bounded when the terminal event is lost", async () => {
+  const { base, seen } = coordinator(true, true);
+  const abort = new AbortController();
+  process.env["ROBO_TOKEN_FILE"] = "/nonexistent/operator-token";
+  try {
+    const started = performance.now();
+    await Promise.resolve(
+      expect(
+        runChat({
+          baseUrl: base,
+          provider: "cliproxy",
+          text: "go",
+          signal: abort.signal,
+          cancelWaitMs: 50,
+          onEvent: (event) => {
+            if (event.type === "chat.tool") abort.abort();
+          },
+        })
+      ).rejects.toThrow("Cancellation outcome unverified")
+    );
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(
+      seen.filter((entry) => entry.path === "/api/chat/cancel")
+    ).toHaveLength(1);
   } finally {
     Reflect.deleteProperty(process.env, "ROBO_TOKEN_FILE");
   }
