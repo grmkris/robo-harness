@@ -256,6 +256,9 @@ export const runOfflineBench = async (options: {
       Schema.decodeUnknownSync(Home)(
         await phase("home", () => options.driver.home(context))
       );
+      // A late health failure must not arrive after a completed artifact is written.
+      clearInterval(poll);
+      if (monitor.checking) await monitor.checking;
       await check();
       save(join(directory, "finished.json"), {
         status: "completed",

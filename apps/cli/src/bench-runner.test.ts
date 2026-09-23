@@ -446,3 +446,40 @@ test("model rotation uses fresh sessions and identical caps, and refuses a reuse
     );
   }
 });
+
+test("a health failure already in flight prevents a completed artifact", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "bench-late-health-"));
+  directories.push(directory);
+  const fixture = makeDriver();
+  let chatting = false;
+  let delayed = false;
+  const result = await runOfflineBench({
+    config,
+    models: ["fixture"],
+    count: 1,
+    directory: join(directory, "run"),
+    signal: new AbortController().signal,
+    pollMs: 1,
+    driver: {
+      ...fixture.driver,
+      health: async () => {
+        if (chatting && !delayed) {
+          delayed = true;
+          await Bun.sleep(50);
+          return { ...status, fault: "late health failure" };
+        }
+        return status;
+      },
+      chat: async (context) => {
+        chatting = true;
+        await Bun.sleep(10);
+        return fixture.driver.chat(context);
+      },
+    },
+  });
+  expect(paused(result).reason).toContain("late health failure");
+  expect(result.completed).toBe(0);
+  expect(
+    await Bun.file(join(directory, "run", "trial-00", "finished.json")).exists()
+  ).toBe(false);
+});
