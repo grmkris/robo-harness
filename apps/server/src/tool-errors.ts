@@ -2,6 +2,7 @@ import { Predicate, Schema } from "effect";
 
 export const FailureCode = Schema.Literals([
   "INVALID_INPUT",
+  "TRANSIENT_CAMERA",
   "CONTROL_REVOKED",
   "CONTROL_BUSY",
   "MOTION_BUSY",

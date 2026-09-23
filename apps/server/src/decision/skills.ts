@@ -1,7 +1,7 @@
 import { joints } from "@robo/domain";
 import type { Joint, Observation } from "@robo/domain";
 
-import { position, reach, tipFrame, type Vec3 } from "./kinematics";
+import { position, reach, tipFrame, toolPoint, type Vec3 } from "./kinematics";
 
 /**
  * Skill controllers: bounded closed loops in code (the jev-drone "guidance"
@@ -327,7 +327,7 @@ interface StepToward {
 }
 
 /** One capped move from the measured pose toward `goal` (all joints scaled together). */
-const stepToward = async (
+export const stepToward = async (
   ctx: SkillContext,
   obs: Observation,
   goal: Partial<Record<Joint, number>>,
@@ -405,7 +405,7 @@ const stepToward = async (
 };
 
 /** Drive toward a joint goal with capped moves until reached, stalled, or out of moves. */
-const goToward = async (
+export const goToward = async (
   ctx: SkillContext,
   goal: Partial<Record<Joint, number>>,
   maxMoves: number,
@@ -442,13 +442,22 @@ const distance = (a: Vec3, b: Vec3) =>
  * "7 cm outward" once lost 6 cm of height and gained 3 cm of reach without
  * anything reporting it.
  */
-const moveTip = async (
+export const moveTip = async (
   ctx: SkillContext,
   displacement: Vec3,
-  maxMoves = 12
+  maxMoves = 12,
+  geometry: {
+    offset?: readonly [number, number, number];
+    toleranceM?: number;
+    segmentM?: number;
+    toleranceDeg?: number;
+  } = {}
 ) => {
+  const offset = geometry.offset ?? [0, 0, 0];
+  const point = (o: Observation) => toolPoint(tipFrame(o.measured), offset);
+  const tolerance = geometry.toleranceM ?? TIP_TOLERANCE_M;
   let obs = await ctx.observe();
-  const from = tipOf(obs);
+  const from = point(obs);
   const target: Vec3 = [
     from[0] + displacement[0],
     from[1] + displacement[1],
@@ -474,7 +483,7 @@ const moveTip = async (
     };
   }
   // The whole target must be reachable before any segment is walked.
-  const check = reach(obs.measured, target, ctx.config.limits);
+  const check = reach(obs.measured, target, ctx.config.limits, 60, offset);
   if (check.errorM > 0.006 || check.downness < 0.95) {
     return {
       obs,
@@ -487,12 +496,12 @@ const moveTip = async (
   const startMoves = ctx.memory.movesUsed;
   const segments = Math.max(
     1,
-    Math.ceil(distance(from, target) / TIP_SEGMENT_M)
+    Math.ceil(distance(from, target) / (geometry.segmentM ?? TIP_SEGMENT_M))
   );
   // One extra round corrects whatever the segments left over.
   for (let round_ = 1; round_ <= segments + 1; round_ += 1) {
-    const here = tipOf(obs);
-    if (distance(here, target) <= TIP_TOLERANCE_M) break;
+    const here = point(obs);
+    if (distance(here, target) <= tolerance) break;
     const remaining = maxMoves - (ctx.memory.movesUsed - startMoves);
     if (remaining <= 0) break;
     const fraction = Math.min(1, round_ / segments);
@@ -501,7 +510,13 @@ const moveTip = async (
       from[1] + displacement[1] * fraction,
       from[2] + displacement[2] * fraction,
     ];
-    const solution = reach(obs.measured, waypoint, ctx.config.limits);
+    const solution = reach(
+      obs.measured,
+      waypoint,
+      ctx.config.limits,
+      60,
+      offset
+    );
     if (solution.errorM > 0.006 || solution.downness < 0.95) {
       return {
         obs,
@@ -517,17 +532,22 @@ const moveTip = async (
       elbow_flex: solution.pose.elbow_flex,
       wrist_flex: solution.pose.wrist_flex,
     };
-    const walked = await goToward(ctx, goal, remaining);
+    const walked = await goToward(
+      ctx,
+      goal,
+      remaining,
+      geometry.toleranceDeg ?? 0.9
+    );
     obs = walked.obs;
-    const after = tipOf(obs);
+    const after = point(obs);
     // No measurable progress on a segment means the joints are not following;
     // more rounds would only spend the budget.
     if (distance(here, after) < 0.003 && !walked.reached) break;
   }
-  const errorM = distance(tipOf(obs), target);
+  const errorM = distance(point(obs), target);
   return {
     obs,
-    reached: errorM <= TIP_TOLERANCE_M,
+    reached: errorM <= tolerance,
     moves: ctx.memory.movesUsed - startMoves,
     errorM,
     vetoed: null,

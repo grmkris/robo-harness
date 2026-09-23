@@ -13,6 +13,8 @@ import {
 
 test("an empty file decodes to the documented defaults", () => {
   expect(decodeManipulationConfig({})).toEqual({
+    commissioned: false,
+    speed_units_s: 1.4,
     tcp_offset_m: [0, 0, 0],
     home_pose: null,
     safe_zone: { polygon: null, max_radius_m: 0.17 },

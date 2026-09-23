@@ -25,6 +25,13 @@ const HomePose = Schema.Struct({
 });
 
 export const ManipulationConfig = Schema.Struct({
+  commissioned: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false))
+  ),
+  /** Conservative velocity, no faster than the motor owner's reviewed profile. */
+  speed_units_s: Schema.Finite.check(
+    Schema.isBetween({ minimum: 0.1, maximum: 2 })
+  ).pipe(Schema.withDecodingDefaultKey(Effect.succeed(1.4))),
   /**
    * Tool centre point in gripper_frame_link coordinates, metres. The URDF
    * gripper frame is not where the fingertips are (on 2026-09-22 the fixed

@@ -440,3 +440,34 @@ test("unconfirmed terminal cleanup keeps the warning and stops renewal", async (
   await Bun.sleep(25);
   expect(r.state.renews).toBe(renewals);
 });
+
+test("a reserved sequence excludes other actions between its steps and releases on error", async () => {
+  const fixture = rig();
+  const executor = createMotionExecutor(fixture.io, fixture.ledger);
+  const pending = Promise.withResolvers<null>();
+  const started = Promise.withResolvers<null>();
+  const owned = executor
+    .withSequence("sequence", async () => {
+      started.resolve(null);
+      await pending.promise;
+      throw new Error("sequence ended");
+    })
+    .catch((error: unknown) => error);
+  await started.promise;
+  const denied = await executor
+    .execute({
+      id: "outsider",
+      owner: "outsider",
+      input: { target: { gripper: 41 }, duration_s: 1 },
+      signal: new AbortController().signal,
+      progress: () => {},
+    })
+    .catch((error: unknown) => error);
+  expect(String(denied)).toContain("MOTION_BUSY");
+  expect(fixture.state.submits).toBe(0);
+  pending.resolve(null);
+  await owned;
+  expect(await executor.withSequence("next", async () => "released")).toBe(
+    "released"
+  );
+});

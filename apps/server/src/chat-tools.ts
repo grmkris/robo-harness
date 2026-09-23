@@ -12,6 +12,14 @@ import { Schema } from "effect";
 
 import { config } from "./config";
 import { decode } from "./decode";
+import {
+  executeManipulationTool,
+  isManipulationTool,
+  manipulationDescriptions,
+  manipulationMotionNames,
+  manipulationSchemas,
+  manipulationSnapshot,
+} from "./manipulation-tools";
 import type { MotionProgress } from "./motion-actions";
 import { motionExecutor as executor } from "./motion-executor";
 import { perceptionConfig } from "./perception";
@@ -44,6 +52,7 @@ const schemas = {
   recording_frame: toolSchemas.recording_frame,
   recording_export: toolSchemas.recording_export,
   shell: toolSchemas.shell,
+  ...manipulationSchemas,
 };
 type ChatToolName = keyof typeof schemas;
 const groups = {
@@ -65,6 +74,7 @@ const basic: ChatToolName[] = [
   "move_joints",
   "stop",
   "discover_tools",
+  ...(Object.keys(manipulationSchemas) as ChatToolName[]),
 ];
 const mutations = new Set<ChatToolName>([
   "move_joints",
@@ -74,6 +84,7 @@ const mutations = new Set<ChatToolName>([
   "recording_start",
   "recording_stop",
   "recording_export",
+  ...(manipulationMotionNames as Set<ChatToolName>),
 ]);
 const jointExample = '{"target":{"elbow_flex":96.3},"duration_s":1}';
 
@@ -86,6 +97,7 @@ export const createChatTools = (options: {
   onProgress: (event: MotionProgress) => void;
   steerRevision?: () => number;
 }) => {
+  const manipulationConfig = manipulationSnapshot();
   let step = 0;
   let mutatedStep = -1;
   let motionDisabled = false;
@@ -93,6 +105,7 @@ export const createChatTools = (options: {
   let offered = new Set<ChatToolName>();
   const describe: Record<ChatToolName, string> = {
     ...descriptions,
+    ...manipulationDescriptions,
     move_joints: `Move to a bounded joint target and wait for measured completion. The runtime handles control and renewal. Supply numbers, never quoted numbers. Angles are degrees, gripper is 0–100. Available even when cartesian is false: use small, visually supported joint probes and capture both cameras again after completion before choosing the next move. One motion per response. Example shape: ${jointExample}; choose values from a fresh observation, within max_step. Do not retry an unknown outcome.`,
     move_cartesian:
       'Move to a commissioned Cartesian position in meters in base_link and wait for measured completion. Example shape: {"xyz":[0.2,0,0.1],"duration_s":1}. Observe first and choose a valid reachable target.',
@@ -101,11 +114,14 @@ export const createChatTools = (options: {
   };
   const tools: Tool[] = (Object.keys(schemas) as ChatToolName[]).map((name) => {
     const schema = schemas[name];
-    const advertised = Object.hasOwn(toolSchemas, name)
-      ? toolInputSchema(name as ToolName)
-      : std(schema)["~standard"].jsonSchema.input({
-          target: "draft-2020-12",
-        });
+    const advertised =
+      name === "home"
+        ? { type: "object", properties: {}, additionalProperties: false }
+        : Object.hasOwn(toolSchemas, name)
+          ? toolInputSchema(name as ToolName)
+          : std(schema)["~standard"].jsonSchema.input({
+              target: "draft-2020-12",
+            });
     const standard = std(schema);
     const definition = toolDefinition({
       name,
@@ -132,7 +148,7 @@ export const createChatTools = (options: {
                 (typeof standard)["~standard"]["jsonSchema"]["input"]
               >[0]
             ) =>
-              Object.hasOwn(toolSchemas, name)
+              name === "home" || Object.hasOwn(toolSchemas, name)
                 ? advertised
                 : standard["~standard"].jsonSchema.input(options),
             output: () => advertised,
@@ -153,7 +169,9 @@ export const createChatTools = (options: {
       if (
         !offered.has(name) ||
         (motionDisabled &&
-          (name === "move_joints" || name === "move_cartesian"))
+          (name === "move_joints" ||
+            name === "move_cartesian" ||
+            manipulationMotionNames.has(name)))
       ) {
         throw new ToolFailure({
           code: "TOOL_NOT_AVAILABLE",
@@ -224,6 +242,28 @@ export const createChatTools = (options: {
           motionDisabled = true;
         return result;
       }
+      if (isManipulationTool(name)) {
+        const revision = options.steerRevision?.() ?? 0;
+        return executeManipulationTool(name, input, {
+          runId: options.runId,
+          toolCallId,
+          signal,
+          onImage: options.onImage,
+          onProgress: options.onProgress,
+          assertCurrent: () => {
+            if (revision !== (options.steerRevision?.() ?? 0))
+              throw new ToolFailure({
+                code: "OPERATOR_STEERED",
+                detail:
+                  "The operator changed the instruction before motion submission. Replan from the new instruction.",
+              });
+          },
+          config: manipulationConfig,
+          onUnsafeOutcome: () => {
+            motionDisabled = true;
+          },
+        });
+      }
       if (name === "observe") {
         // Model/tool initialization can outlive the sampler's cache window.
         // An explicit agent observation reads the motor service afresh and
@@ -269,7 +309,9 @@ export const createChatTools = (options: {
           : [...enabled].filter(
               (name) =>
                 !(
-                  (name === "move_joints" || name === "move_cartesian") &&
+                  (name === "move_joints" ||
+                    name === "move_cartesian" ||
+                    manipulationMotionNames.has(name)) &&
                   motionDisabled
                 )
             )

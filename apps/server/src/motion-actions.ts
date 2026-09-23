@@ -64,6 +64,7 @@ export interface ActionRequest {
   signal: AbortSignal;
   progress: (event: MotionProgress) => void;
   assertCurrent?: () => void;
+  sequenceId?: string;
 }
 const terminalStatus = (
   operation: Operation | null
@@ -138,9 +139,31 @@ export const createMotionExecutor = (
   timing = defaultTiming
 ) => {
   let busy = false;
+  let sequence: string | null = null;
+  const withSequence = async <A>(
+    id: string,
+    run: () => Promise<A>
+  ): Promise<A> => {
+    if (busy || sequence !== null)
+      throw new ToolFailure({
+        code: "MOTION_BUSY",
+        detail: "A supervised motion sequence is already executing.",
+      });
+    sequence = id;
+    try {
+      return await run();
+    } finally {
+      sequence = null;
+    }
+  };
   const execute = async (request: ActionRequest): Promise<ActionResult> => {
     request.signal.throwIfAborted();
     request.assertCurrent?.();
+    if (sequence !== null && request.sequenceId !== sequence)
+      throw new ToolFailure({
+        code: "MOTION_BUSY",
+        detail: "Another supervised motion sequence owns admission.",
+      });
     const saved = ledger.get(request.id);
     if (saved) {
       if (JSON.stringify(saved.input) !== JSON.stringify(request.input)) {
@@ -385,5 +408,5 @@ export const createMotionExecutor = (
     });
     return record.result;
   };
-  return { execute };
+  return { execute, withSequence };
 };

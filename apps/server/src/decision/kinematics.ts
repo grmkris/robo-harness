@@ -146,6 +146,19 @@ export const position = (m: Mat4): Vec3 => [
   m[2]?.[3] ?? 0,
 ];
 
+/** Position of a point expressed in the gripper frame, in base_link metres. */
+export const toolPoint = (
+  m: Mat4,
+  offset: readonly [number, number, number]
+): Vec3 => [
+  (m[0]?.[3] ?? 0) +
+    offset.reduce((sum, v, i) => sum + v * (m[0]?.[i] ?? 0), 0),
+  (m[1]?.[3] ?? 0) +
+    offset.reduce((sum, v, i) => sum + v * (m[1]?.[i] ?? 0), 0),
+  (m[2]?.[3] ?? 0) +
+    offset.reduce((sum, v, i) => sum + v * (m[2]?.[i] ?? 0), 0),
+];
+
 /** 1 when the gripper's approach axis (frame +z) points straight down. */
 export const downness = (m: Mat4): number => -(m[2]?.[2] ?? 0);
 
@@ -194,12 +207,13 @@ export const reach = (
   start: ArmPose,
   target: Vec3,
   limits: Readonly<Record<string, readonly [number, number]>>,
-  iterations = 60
+  iterations = 60,
+  offset: readonly [number, number, number] = [0, 0, 0]
 ): ReachResult => {
   const pose: SolverPose = { ...start };
   const residual = (p: JointAngles) => {
     const m = tipFrame(p);
-    const [x, y, z] = position(m);
+    const [x, y, z] = toolPoint(m, offset);
     return [
       (x - target[0]) * 100,
       (y - target[1]) * 100,
@@ -241,7 +255,7 @@ export const reach = (
     }
   }
   const m = tipFrame(pose);
-  const [x, y, z] = position(m);
+  const [x, y, z] = toolPoint(m, offset);
   return {
     pose: pose as ArmPose,
     errorM: Math.hypot(x - target[0], y - target[1], z - target[2]),
