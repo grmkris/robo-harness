@@ -4,7 +4,7 @@ The general chat tools and SO-101 skills are shared by all models. Task-specific
 
 `bun run bench --count=6` prints a seeded schedule. It performs no network request or motion. It refuses an uncommissioned manipulation config, missing geometry, more than 32 targets, targets closer than 3 cm, or an area too small for the requested count. The current lab profile is deliberately uncommissioned. Opus is excluded from the primary rotation; the overnight handoff caps it at two later trials.
 
-A live trial runner and scripted reset execution are not wired up yet. The reset policy reobserves an unknown position and pauses after three failed attempts. The physical admission gates remain a measured TCP/home/safe polygon, a held-out homography error within about 1 cm, three reset pick-and-places and one watched trial per model. Offline tests do not satisfy those gates.
+A live trial runner is not wired up yet. The fixture reset loop (`apps/server/src/bench-reset.ts`) is implemented and tested, but its adapter is not connected to live hardware. It reobserves an unknown position and pauses after three failed attempts. The physical admission gates remain a measured TCP/home/safe polygon, a held-out homography error within about 1 cm, three reset pick-and-places and one watched trial per model. Offline tests do not satisfy those gates. The reset adapter must use the shared supervised executor, stop on the first unknown/failed motion, and independently verify contact, lift and final placement before another attempt.
 
 ## Read-only evidence capture
 
